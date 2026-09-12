@@ -1,0 +1,36 @@
+# =========================
+# Python Backend
+# =========================
+
+smart-port-backend/venv/
+smart-port-backend/.venv/
+smart-port-backend/__pycache__/
+smart-port-backend/**/*.pyc
+smart-port-backend/.pytest_cache/
+
+# Backend environment variables
+smart-port-backend/.env
+
+# =========================
+# Node / React Frontend
+# =========================
+
+smart-port-frontend/node_modules/
+smart-port-frontend/dist/
+smart-port-frontend/build/
+
+# Environment variables
+smart-port-frontend/.env
+smart-port-frontend/.env.local
+smart-port-frontend/.env.development.local
+smart-port-frontend/.env.production.local
+
+# =========================
+# General
+# =========================
+
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
