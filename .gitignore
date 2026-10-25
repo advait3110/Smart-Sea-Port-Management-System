@@ -2,11 +2,23 @@
 # Python Backend
 # =========================
 
+# Virtual environments (in the project root and in the backend)
+venv/
+.venv/
 smart-port-backend/venv/
 smart-port-backend/.venv/
-smart-port-backend/__pycache__/
+
+__pycache__/
 smart-port-backend/**/*.pyc
 smart-port-backend/.pytest_cache/
+
+# Runtime data made by the running backend (kept on the server, not in git)
+smart-port-backend/ais_state/
+smart-port-backend/ml_models/
+smart-port-backend/.vesselapi_state.json
+
+# Backup copies
+*.bak
 
 # Backend environment variables
 smart-port-backend/.env
@@ -24,6 +36,11 @@ smart-port-frontend/.env
 smart-port-frontend/.env.local
 smart-port-frontend/.env.development.local
 smart-port-frontend/.env.production.local
+
+# Any .env file anywhere (secrets). The shared example file is allowed.
+**/.env
+**/.env.*
+!**/.env.example
 
 # =========================
 # General

@@ -1,391 +1,680 @@
-const SESSION_KEY = "karwarPortSession";
+// =========================================================
+// KARWAR PORT
+// SESSION MANAGER
+// =========================================================
+
 const ACTIVE_SESSIONS_KEY = "karwarPortActiveSessions";
+const CURRENT_SESSION_KEY = "karwarPortCurrentSession";
 
-const SESSION_TIMEOUT = 60 * 1000; // 1 minute
-const HEARTBEAT_INTERVAL = 20 * 1000; // 20 seconds
+// Current session is tab-specific.
+// Shared active-session registry is kept in localStorage.
 
-// ---------------------------------------------------------
-// Generate unique session ID
-// ---------------------------------------------------------
+const HEARTBEAT_INTERVAL = 10000;
+const SESSION_TIMEOUT = 30000;
 
-const generateSessionId = () => {
-  return `KP-${Date.now()}-${Math.random()
-    .toString(36)
-    .substring(2, 10)}`;
-};
+let heartbeatTimer = null;
+let storageListenerAttached = false;
 
-// ---------------------------------------------------------
-// Get current tab's session
-// ---------------------------------------------------------
+// =========================================================
+// STORAGE HELPERS
+// =========================================================
 
-export const getCurrentSession = () => {
-  const storedSession = sessionStorage.getItem(SESSION_KEY);
-
-  if (!storedSession) {
+const getStorage = (storageType) => {
+  if (typeof window === "undefined") {
     return null;
   }
 
   try {
-    const session = JSON.parse(storedSession);
+    return storageType === "session"
+      ? window.sessionStorage
+      : window.localStorage;
+  } catch (error) {
+    console.error(
+      "Unable to access browser storage:",
+      error
+    );
 
-    if (
-      !session ||
-      !session.sessionId ||
-      !session.userId
-    ) {
-      sessionStorage.removeItem(SESSION_KEY);
+    return null;
+  }
+};
+
+// =========================================================
+// CREATE SESSION ID
+// =========================================================
+
+const createSessionId = () => {
+  return `${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+};
+
+// =========================================================
+// READ ACTIVE SESSIONS
+// =========================================================
+
+const readSessions = () => {
+  try {
+    const storage = getStorage("local");
+
+    if (!storage) {
+      return [];
+    }
+
+    const stored = storage.getItem(
+      ACTIVE_SESSIONS_KEY
+    );
+
+    if (!stored) {
+      return [];
+    }
+
+    const sessions = JSON.parse(stored);
+
+    return Array.isArray(sessions)
+      ? sessions
+      : [];
+  } catch (error) {
+    console.error(
+      "Unable to read active sessions:",
+      error
+    );
+
+    return [];
+  }
+};
+
+// =========================================================
+// WRITE ACTIVE SESSIONS
+// =========================================================
+
+const writeSessions = (sessions) => {
+  try {
+    const storage = getStorage("local");
+
+    if (!storage) {
+      return;
+    }
+
+    storage.setItem(
+      ACTIVE_SESSIONS_KEY,
+      JSON.stringify(
+        Array.isArray(sessions)
+          ? sessions
+          : []
+      )
+    );
+  } catch (error) {
+    console.error(
+      "Unable to write active sessions:",
+      error
+    );
+  }
+};
+
+// =========================================================
+// REMOVE EXPIRED SESSIONS
+// =========================================================
+
+const removeExpiredSessions = (
+  sessions = readSessions()
+) => {
+  const now = Date.now();
+
+  const activeSessions = sessions.filter(
+    (session) => {
+      const lastActivity = Number(
+        session?.lastActivity || 0
+      );
+
+      return (
+        lastActivity > 0 &&
+        now - lastActivity <=
+          SESSION_TIMEOUT
+      );
+    }
+  );
+
+  if (
+    activeSessions.length !==
+    sessions.length
+  ) {
+    writeSessions(activeSessions);
+  }
+
+  return activeSessions;
+};
+
+// =========================================================
+// CREATE SESSION
+// =========================================================
+
+export const createSession = (user = {}) => {
+  try {
+    const now = Date.now();
+
+    const session = {
+      sessionId: createSessionId(),
+
+      id: user.id,
+
+      userId: user.id,
+
+      user_id: user.id,
+
+      adminId:
+        user.adminId ||
+        user.username ||
+        "",
+
+      username:
+        user.username ||
+        user.adminId ||
+        "",
+
+      email: user.email || "",
+
+      name:
+        user.name ||
+        user.full_name ||
+        user.username ||
+        "",
+
+      full_name:
+        user.full_name ||
+        user.name ||
+        "",
+
+      role:
+        user.role ||
+        user.employeeRole ||
+        "",
+
+      department:
+        user.department || "",
+
+      permissions: Array.isArray(
+        user.permissions
+      )
+        ? [...user.permissions]
+        : [],
+
+      createdAt: now,
+
+      lastActivity: now,
+    };
+
+    const sessions =
+      removeExpiredSessions();
+
+    // -------------------------------------------------------
+    // Remove older session belonging to the SAME USER.
+    //
+    // Do NOT remove sessions belonging to another user.
+    // -------------------------------------------------------
+
+    const filteredSessions =
+      sessions.filter((item) => {
+        const existingUsername =
+          String(
+            item?.username ||
+              item?.adminId ||
+              ""
+          )
+            .trim()
+            .toLowerCase();
+
+        const newUsername =
+          String(
+            session?.username ||
+              session?.adminId ||
+              ""
+          )
+            .trim()
+            .toLowerCase();
+
+        const existingUserId =
+          String(
+            item?.userId ??
+              item?.user_id ??
+              item?.id ??
+              ""
+          ).trim();
+
+        const newUserId =
+          String(
+            session?.userId ??
+              session?.user_id ??
+              session?.id ??
+              ""
+          ).trim();
+
+        const sameUsername =
+          existingUsername &&
+          newUsername &&
+          existingUsername ===
+            newUsername;
+
+        const sameUserId =
+          existingUserId &&
+          newUserId &&
+          existingUserId === newUserId;
+
+        return !(
+          sameUsername ||
+          sameUserId
+        );
+      });
+
+    const updatedSessions = [
+      ...filteredSessions,
+      session,
+    ];
+
+    writeSessions(updatedSessions);
+
+    // -------------------------------------------------------
+    // Current session belongs ONLY to this browser tab.
+    // -------------------------------------------------------
+
+    const sessionStorage =
+      getStorage("session");
+
+    if (sessionStorage) {
+      sessionStorage.setItem(
+        CURRENT_SESSION_KEY,
+        JSON.stringify(session)
+      );
+    }
+
+    return session;
+  } catch (error) {
+    console.error(
+      "Unable to create session:",
+      error
+    );
+
+    return null;
+  }
+};
+
+// =========================================================
+// GET CURRENT SESSION
+// =========================================================
+
+export const getCurrentSession = () => {
+  try {
+    const storage = getStorage("session");
+
+    if (!storage) {
+      return null;
+    }
+
+    const stored =
+      storage.getItem(
+        CURRENT_SESSION_KEY
+      );
+
+    if (!stored) {
+      return null;
+    }
+
+    const session = JSON.parse(stored);
+
+    if (!session?.sessionId) {
+      storage.removeItem(
+        CURRENT_SESSION_KEY
+      );
+
       return null;
     }
 
     return session;
   } catch (error) {
     console.error(
-      "Unable to restore Karwar Port session:",
+      "Unable to retrieve current session:",
       error
     );
 
-    sessionStorage.removeItem(SESSION_KEY);
     return null;
   }
 };
 
-// ---------------------------------------------------------
-// Save current tab's session
-// ---------------------------------------------------------
+// =========================================================
+// UPDATE CURRENT SESSION
+// =========================================================
+//
+// Updates the active registry AND this tab's
+// sessionStorage copy.
+//
+// Optional updates are used when backend RBAC
+// permissions are refreshed.
+// =========================================================
 
-const saveCurrentSession = (session) => {
-  if (!session) {
-    sessionStorage.removeItem(SESSION_KEY);
-    return;
+export const updateCurrentSession = (
+  updates = {}
+) => {
+  const currentSession =
+    getCurrentSession();
+
+  if (!currentSession?.sessionId) {
+    return null;
   }
 
-  sessionStorage.setItem(
-    SESSION_KEY,
-    JSON.stringify(session)
-  );
-};
+  const sessions =
+    removeExpiredSessions();
 
-// ---------------------------------------------------------
-// Get all active sessions
-// ---------------------------------------------------------
+  const sessionIndex =
+    sessions.findIndex(
+      (session) =>
+        session?.sessionId ===
+        currentSession.sessionId
+    );
 
-const getActiveSessions = () => {
-  const storedSessions =
-    localStorage.getItem(ACTIVE_SESSIONS_KEY);
+  // -------------------------------------------------------
+  // Current session no longer exists in registry.
+  // -------------------------------------------------------
 
-  if (!storedSessions) {
-    return [];
-  }
+  if (sessionIndex === -1) {
+    const sessionStorage =
+      getStorage("session");
 
-  try {
-    const sessions = JSON.parse(storedSessions);
-
-    if (!Array.isArray(sessions)) {
-      return [];
+    if (sessionStorage) {
+      sessionStorage.removeItem(
+        CURRENT_SESSION_KEY
+      );
     }
 
-    return sessions.filter(
-      (session) =>
-        session &&
-        session.sessionId &&
-        session.userId &&
-        typeof session.lastActivity === "number"
-    );
-  } catch (error) {
-    console.error(
-      "Unable to read active Karwar Port sessions:",
-      error
-    );
-
-    return [];
-  }
-};
-
-// ---------------------------------------------------------
-// Save active sessions
-// ---------------------------------------------------------
-
-const saveActiveSessions = (sessions) => {
-  localStorage.setItem(
-    ACTIVE_SESSIONS_KEY,
-    JSON.stringify(sessions)
-  );
-};
-
-// ---------------------------------------------------------
-// Remove expired sessions
-// ---------------------------------------------------------
-
-const removeExpiredSessions = () => {
-  const now = Date.now();
-  const sessions = getActiveSessions();
-
-  const activeSessions = sessions.filter(
-    (session) =>
-      now - session.lastActivity < SESSION_TIMEOUT
-  );
-
-  // Avoid unnecessary localStorage writes.
-  if (activeSessions.length !== sessions.length) {
-    saveActiveSessions(activeSessions);
-  }
-
-  return activeSessions;
-};
-
-// ---------------------------------------------------------
-// Create a session
-// ---------------------------------------------------------
-
-export const createSession = (user) => {
-  if (!user?.id) {
-    return null;
-  }
-
-  const now = Date.now();
-
-  const session = {
-    sessionId: generateSessionId(),
-    userId: user.id,
-    adminId: user.adminId,
-    name: user.name,
-    role: user.role,
-    department: user.department,
-    loginTime: now,
-    lastActivity: now,
-  };
-
-  // Store this session only in the current browser tab.
-  saveCurrentSession(session);
-
-  // Remove expired sessions first.
-  const sessions = removeExpiredSessions();
-
-  // Add the new session.
-  saveActiveSessions([
-    ...sessions,
-    session,
-  ]);
-
-  return session;
-};
-
-// ---------------------------------------------------------
-// Update heartbeat / activity
-// ---------------------------------------------------------
-
-export const updateSessionActivity = () => {
-  const currentSession = getCurrentSession();
-
-  if (!currentSession) {
     return null;
   }
 
   const updatedSession = {
-    ...currentSession,
+    ...sessions[sessionIndex],
+
+    ...(updates &&
+    typeof updates === "object"
+      ? updates
+      : {}),
+
+    // Never allow an update to replace
+    // the identity of the current session.
+    sessionId:
+      sessions[sessionIndex].sessionId,
+
+    createdAt:
+      sessions[sessionIndex].createdAt,
+
     lastActivity: Date.now(),
   };
 
-  // Update current tab.
-  saveCurrentSession(updatedSession);
+  // Keep identity fields synchronized.
+  if (
+    updatedSession.id === undefined &&
+    updatedSession.userId !== undefined
+  ) {
+    updatedSession.id =
+      updatedSession.userId;
+  }
 
-  // Update shared active-session registry.
-  const sessions = removeExpiredSessions();
+  if (
+    updatedSession.userId === undefined &&
+    updatedSession.id !== undefined
+  ) {
+    updatedSession.userId =
+      updatedSession.id;
+  }
 
-  const sessionExists = sessions.some(
-    (session) =>
-      session.sessionId === updatedSession.sessionId
-  );
+  if (
+    updatedSession.user_id === undefined &&
+    updatedSession.id !== undefined
+  ) {
+    updatedSession.user_id =
+      updatedSession.id;
+  }
 
-  if (!sessionExists) {
-    // The session expired from the shared registry.
-    // Re-register it because this tab is still active.
-    saveActiveSessions([
-      ...sessions,
-      updatedSession,
-    ]);
-  } else {
-    const updatedSessions = sessions.map(
-      (session) =>
-        session.sessionId === updatedSession.sessionId
-          ? updatedSession
-          : session
+  if (!Array.isArray(updatedSession.permissions)) {
+    updatedSession.permissions = [];
+  }
+
+  sessions[sessionIndex] =
+    updatedSession;
+
+  writeSessions(sessions);
+
+  // Update only this browser tab.
+  const sessionStorage =
+    getStorage("session");
+
+  if (sessionStorage) {
+    sessionStorage.setItem(
+      CURRENT_SESSION_KEY,
+      JSON.stringify(updatedSession)
     );
-
-    saveActiveSessions(updatedSessions);
   }
 
   return updatedSession;
 };
 
-// ---------------------------------------------------------
-// Remove current session
-// ---------------------------------------------------------
+// =========================================================
+// DESTROY SESSION
+// =========================================================
 
 export const destroySession = () => {
-  const currentSession = getCurrentSession();
+  try {
+    const currentSession =
+      getCurrentSession();
 
-  // Always clear the current tab.
-  sessionStorage.removeItem(SESSION_KEY);
+    const currentSessionId =
+      currentSession?.sessionId;
 
-  if (!currentSession) {
+    const sessions = readSessions();
+
+    const remainingSessions =
+      currentSessionId
+        ? sessions.filter(
+            (session) =>
+              session?.sessionId !==
+              currentSessionId
+          )
+        : sessions;
+
+    writeSessions(
+      remainingSessions
+    );
+
+    // Remove only this tab's session.
+    const sessionStorage =
+      getStorage("session");
+
+    if (sessionStorage) {
+      sessionStorage.removeItem(
+        CURRENT_SESSION_KEY
+      );
+    }
+
+    stopSessionHeartbeat();
+
+    return true;
+  } catch (error) {
+    console.error(
+      "Unable to destroy session:",
+      error
+    );
+
+    return false;
+  }
+};
+
+// =========================================================
+// START SESSION HEARTBEAT
+// =========================================================
+
+export const startSessionHeartbeat = () => {
+  stopSessionHeartbeat();
+
+  updateCurrentSession();
+
+  if (
+    typeof window === "undefined"
+  ) {
     return;
   }
 
-  const sessions = getActiveSessions();
-
-  const remainingSessions = sessions.filter(
-    (session) =>
-      session.sessionId !== currentSession.sessionId
-  );
-
-  saveActiveSessions(remainingSessions);
+  heartbeatTimer =
+    window.setInterval(() => {
+      updateCurrentSession();
+    }, HEARTBEAT_INTERVAL);
 };
 
-// ---------------------------------------------------------
-// Check whether a user is currently active
-// ---------------------------------------------------------
+// =========================================================
+// STOP SESSION HEARTBEAT
+// =========================================================
 
-export const isUserActive = (userId) => {
-  if (!userId) {
-    return false;
+export const stopSessionHeartbeat = () => {
+  if (
+    heartbeatTimer !== null &&
+    typeof window !== "undefined"
+  ) {
+    window.clearInterval(
+      heartbeatTimer
+    );
+
+    heartbeatTimer = null;
   }
-
-  const sessions = removeExpiredSessions();
-
-  return sessions.some(
-    (session) => session.userId === userId
-  );
 };
 
-// ---------------------------------------------------------
-// Get active sessions for a particular user
-// ---------------------------------------------------------
-
-export const getUserActiveSessions = (userId) => {
-  if (!userId) {
-    return [];
-  }
-
-  const sessions = removeExpiredSessions();
-
-  return sessions.filter(
-    (session) => session.userId === userId
-  );
-};
-
-// ---------------------------------------------------------
-// Get all currently active sessions
-// ---------------------------------------------------------
+// =========================================================
+// GET ACTIVE SESSIONS
+// =========================================================
 
 export const getActiveSessionsList = () => {
   return removeExpiredSessions();
 };
 
-// ---------------------------------------------------------
-// Heartbeat
-// ---------------------------------------------------------
+// =========================================================
+// GET USER ACTIVE SESSIONS
+// =========================================================
+//
+// Compatibility export used by:
+// src/views/admin/Security/index.jsx
+// =========================================================
 
-let heartbeatTimer = null;
+export const getUserActiveSessions = () => {
+  return getActiveSessionsList();
+};
 
-export const startSessionHeartbeat = () => {
-  // Prevent multiple heartbeat timers.
-  if (heartbeatTimer) {
-    return;
+// =========================================================
+// CHECK WHETHER USER IS ACTIVE
+// =========================================================
+
+export const isUserActive = (
+  userIdentifier
+) => {
+  if (
+    userIdentifier === undefined ||
+    userIdentifier === null ||
+    String(userIdentifier).trim() === ""
+  ) {
+    return false;
   }
 
-  const currentSession = getCurrentSession();
+  const target = String(
+    userIdentifier
+  )
+    .trim()
+    .toLowerCase();
 
-  if (!currentSession) {
-    return;
-  }
+  const activeSessions =
+    getActiveSessionsList();
 
-  // Update immediately.
-  updateSessionActivity();
+  return activeSessions.some(
+    (session) => {
+      const identifiers = [
+        session?.id,
+        session?.userId,
+        session?.user_id,
+        session?.adminId,
+        session?.username,
+        session?.email,
+        session?.name,
+        session?.full_name,
+      ]
+        .filter(
+          (value) =>
+            value !== undefined &&
+            value !== null &&
+            String(value).trim() !== ""
+        )
+        .map((value) =>
+          String(value)
+            .trim()
+            .toLowerCase()
+        );
 
-  // Then update every 20 seconds.
-  heartbeatTimer = setInterval(() => {
-    const session = getCurrentSession();
-
-    if (!session) {
-      stopSessionHeartbeat();
-      return;
+      return identifiers.includes(
+        target
+      );
     }
-
-    updateSessionActivity();
-  }, HEARTBEAT_INTERVAL);
+  );
 };
 
-// ---------------------------------------------------------
-// Stop heartbeat
-// ---------------------------------------------------------
-
-export const stopSessionHeartbeat = () => {
-  if (!heartbeatTimer) {
-    return;
-  }
-
-  clearInterval(heartbeatTimer);
-  heartbeatTimer = null;
-};
-
-// ---------------------------------------------------------
-// Session manager initialization
-// ---------------------------------------------------------
-
-let sessionManagerInitialized = false;
+// =========================================================
+// INITIALIZE SESSION MANAGER
+// =========================================================
 
 export const initializeSessionManager = () => {
-  // Prevent duplicate event listeners.
-  if (sessionManagerInitialized) {
+  if (
+    typeof window === "undefined"
+  ) {
     return;
   }
 
-  sessionManagerInitialized = true;
+  removeExpiredSessions();
 
-  // -------------------------------------------------------
-  // Browser/tab closing
-  // -------------------------------------------------------
+  if (storageListenerAttached) {
+    return;
+  }
 
-  window.addEventListener("beforeunload", () => {
-    destroySession();
-    stopSessionHeartbeat();
-  });
-
-  // -------------------------------------------------------
-  // Synchronize active sessions between browser tabs
-  // -------------------------------------------------------
-
-  window.addEventListener("storage", (event) => {
-    if (event.key === ACTIVE_SESSIONS_KEY) {
+  const handleStorage = (event) => {
+    if (
+      event.key ===
+      ACTIVE_SESSIONS_KEY
+    ) {
       removeExpiredSessions();
     }
-  });
+  };
 
-  // -------------------------------------------------------
-  // Start heartbeat if a session already exists
-  // -------------------------------------------------------
+  window.addEventListener(
+    "storage",
+    handleStorage
+  );
 
-  if (getCurrentSession()) {
-    startSessionHeartbeat();
-  }
+  storageListenerAttached = true;
 };
 
-// ---------------------------------------------------------
-// Default export
-// ---------------------------------------------------------
+// =========================================================
+// DEFAULT EXPORT
+// =========================================================
 
 const sessionManager = {
-  getCurrentSession,
   createSession,
-  updateSessionActivity,
+
+  getCurrentSession,
+
+  updateCurrentSession,
+
   destroySession,
-  isUserActive,
-  getUserActiveSessions,
-  getActiveSessionsList,
+
   startSessionHeartbeat,
+
   stopSessionHeartbeat,
+
   initializeSessionManager,
+
+  getActiveSessionsList,
+
+  getUserActiveSessions,
+
+  isUserActive,
 };
 
 export default sessionManager;

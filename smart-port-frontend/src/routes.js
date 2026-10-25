@@ -9,7 +9,7 @@ import PortMap from "views/admin/PortMap";
 import Weather from "views/admin/Weather";
 import VesselManagement from "views/admin/Vessels";
 import Berths from "views/admin/Berths";
-import CargoOperations from "views/admin/Cargo";
+import CargoOperations from "views/admin/CargoOperations";
 import GateManagement from "views/admin/Gate";
 
 // =========================================================
@@ -32,6 +32,11 @@ import AssetMaintenance from "views/admin/AssetMaintenance";
 // =========================================================
 
 import Analytics from "views/admin/Analytics";
+
+// One page for all four ML predictions, as tabs: Predict Vessel
+// Delay (built), Berth Congestion, Cargo Throughput and Equipment
+// Failure (not built yet; the page says so).
+import DelayPrediction from "views/admin/DelayPrediction";
 
 // =========================================================
 // ADMINISTRATION
@@ -66,6 +71,7 @@ import {
 
   // Intelligence & Analytics
   MdAnalytics,
+  MdSchedule,
 
   // Administration
   MdDescription,
@@ -82,6 +88,46 @@ import {
 
 // =========================================================
 // ROUTES
+// =========================================================
+//
+// IMPORTANT:
+// `moduleKey` is the authoritative backend RBAC module.
+// Both the sidebar and the admin route guard check it
+// first, so a route WITHOUT a moduleKey is visible to every
+// logged-in user. Every real module route must have one.
+//
+// These values MUST match PostgreSQL permission keys:
+//
+// dashboard
+// port_map
+// weather
+// vessels
+// berths
+// cargo
+// gate_trucks
+// port_communication
+// notifications
+// port_alerts
+// incidents
+// asset_maintenance
+// analytics
+// documents
+// audit_logs
+// user_role_management
+//
+// The Delay Prediction page (the four ML predictions as tabs)
+// belongs to Intelligence & Analytics and uses the existing
+// `analytics` module key. Whoever may open Port Analytics may
+// open it. A separate key would first have to be added to the
+// backend and to the PostgreSQL permission table.
+//
+// `permission` is a LEGACY granular key. It is only used by
+// the admin layout when a route has no `moduleKey`. Every
+// route below has a moduleKey, so it is currently unused.
+// It is kept for compatibility.
+//
+// Frontend route checks only control the UI. The FastAPI
+// backend must enforce authorization on every endpoint.
 // =========================================================
 
 const routes = [
@@ -101,6 +147,8 @@ const routes = [
         path: "default",
         icon: <MdDashboard className="h-6 w-6" />,
         component: <MainDashboard />,
+
+        moduleKey: "dashboard",
         permission: "dashboard.view",
       },
 
@@ -110,6 +158,8 @@ const routes = [
         path: "port-map",
         icon: <MdMap className="h-6 w-6" />,
         component: <PortMap />,
+
+        moduleKey: "port_map",
         permission: "port_map.view",
       },
 
@@ -119,6 +169,8 @@ const routes = [
         path: "weather",
         icon: <MdCloud className="h-6 w-6" />,
         component: <Weather />,
+
+        moduleKey: "weather",
         permission: "weather.view",
       },
 
@@ -128,6 +180,8 @@ const routes = [
         path: "vessels",
         icon: <MdDirectionsBoat className="h-6 w-6" />,
         component: <VesselManagement />,
+
+        moduleKey: "vessels",
         permission: "vessel.view",
       },
 
@@ -137,6 +191,8 @@ const routes = [
         path: "berths",
         icon: <MdAnchor className="h-6 w-6" />,
         component: <Berths />,
+
+        moduleKey: "berths",
         permission: "berth.view",
       },
 
@@ -146,6 +202,8 @@ const routes = [
         path: "cargo",
         icon: <MdInventory className="h-6 w-6" />,
         component: <CargoOperations />,
+
+        moduleKey: "cargo",
         permission: "cargo.view",
       },
 
@@ -155,6 +213,8 @@ const routes = [
         path: "gate-management",
         icon: <MdLocalShipping className="h-6 w-6" />,
         component: <GateManagement />,
+
+        moduleKey: "gate_trucks",
         permission: "gate.view",
       },
     ],
@@ -176,6 +236,8 @@ const routes = [
         path: "communication",
         icon: <MdForum className="h-6 w-6" />,
         component: <PortCommunication />,
+
+        moduleKey: "port_communication",
         permission: "communication.view",
       },
 
@@ -185,6 +247,8 @@ const routes = [
         path: "notifications",
         icon: <MdNotifications className="h-6 w-6" />,
         component: <Notifications />,
+
+        moduleKey: "notifications",
         permission: "notifications.view",
       },
     ],
@@ -206,6 +270,8 @@ const routes = [
         path: "alerts",
         icon: <MdWarning className="h-6 w-6" />,
         component: <PortAlerts />,
+
+        moduleKey: "port_alerts",
         permission: "alerts.view",
       },
 
@@ -215,6 +281,8 @@ const routes = [
         path: "incidents",
         icon: <MdReportProblem className="h-6 w-6" />,
         component: <IncidentManagement />,
+
+        moduleKey: "incidents",
         permission: "incident.view",
       },
 
@@ -224,6 +292,8 @@ const routes = [
         path: "maintenance",
         icon: <MdBuild className="h-6 w-6" />,
         component: <AssetMaintenance />,
+
+        moduleKey: "asset_maintenance",
         permission: "maintenance.view",
       },
     ],
@@ -245,6 +315,23 @@ const routes = [
         path: "analytics",
         icon: <MdAnalytics className="h-6 w-6" />,
         component: <Analytics />,
+
+        moduleKey: "analytics",
+        permission: "analytics.view",
+      },
+
+      // ---------------------------------------------------
+      // ML PREDICTIONS (all four, as tabs on one page)
+      // ---------------------------------------------------
+
+      {
+        name: "Delay Prediction",
+        layout: "/admin",
+        path: "delay-prediction",
+        icon: <MdSchedule className="h-6 w-6" />,
+        component: <DelayPrediction />,
+
+        moduleKey: "analytics",
         permission: "analytics.view",
       },
     ],
@@ -266,6 +353,8 @@ const routes = [
         path: "documents",
         icon: <MdDescription className="h-6 w-6" />,
         component: <DocumentManagement />,
+
+        moduleKey: "documents",
         permission: "document.view",
       },
 
@@ -275,6 +364,8 @@ const routes = [
         path: "audit-logs",
         icon: <MdHistory className="h-6 w-6" />,
         component: <AuditLogs />,
+
+        moduleKey: "audit_logs",
         permission: "audit.view",
       },
 
@@ -284,6 +375,8 @@ const routes = [
         path: "users",
         icon: <MdPeople className="h-6 w-6" />,
         component: <UserManagement />,
+
+        moduleKey: "user_role_management",
         permission: "users.view",
       },
     ],

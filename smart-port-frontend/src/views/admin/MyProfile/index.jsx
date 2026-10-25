@@ -1,106 +1,182 @@
 import React from "react";
+
+import { Link } from "react-router-dom";
+
 import {
   MdPerson,
-  MdBadge,
-  MdBusiness,
-  MdEmail,
+  MdKey,
+  MdWork,
+  MdPhone,
+  MdEdit,
   MdVerifiedUser,
-  MdAccessTime,
+  MdBlock,
 } from "react-icons/md";
 
 import authService from "layouts/auth/authService";
-import { getCurrentSession } from "layouts/auth/sessionManager";
+
+import {
+  PROFILE_EVENT,
+  initialsOf,
+  loadMyProfile,
+} from "services/profile";
 
 // =========================================================
 // MY PROFILE
 // =========================================================
+//
+// A read-only summary of the logged-in employee: profile
+// picture, name, role, Admin ID and phone number. Everything
+// can be changed on the Account Settings page.
+//
+// The port has no e-mail addresses: employees sign in with the
+// Admin ID.
+
+const InfoTile = ({ icon, label, value }) => (
+  <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-white/5 dark:bg-navy-900">
+    <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+      {icon}
+      {label}
+    </p>
+
+    <p className="mt-2 break-words text-sm font-bold text-navy-700 dark:text-white">
+      {value || "—"}
+    </p>
+  </div>
+);
 
 const MyProfile = () => {
-  const [user, setUser] = React.useState(() =>
-    authService.getCurrentUser()
-  );
+  const sessionUser = authService.getCurrentUser();
 
-  const [session, setSession] = React.useState(() =>
-    getCurrentSession()
-  );
+  const [profile, setProfile] = React.useState(null);
+
+  const [problem, setProblem] = React.useState(false);
 
   React.useEffect(() => {
-    setUser(authService.getCurrentUser());
-    setSession(getCurrentSession());
+    let cancelled = false;
+
+    loadMyProfile()
+      .then((saved) => {
+        if (!cancelled) {
+          setProfile(saved);
+        }
+      })
+      .catch((error) => {
+        console.error("Unable to load profile:", error);
+
+        if (!cancelled) {
+          setProblem(true);
+        }
+      });
+
+    // The Account Settings page and the top bar tell us when the
+    // picture or the name changes.
+    const handleChange = (event) => {
+      if (event.detail) {
+        setProfile(event.detail);
+      }
+    };
+
+    window.addEventListener(PROFILE_EVENT, handleChange);
+
+    return () => {
+      cancelled = true;
+
+      window.removeEventListener(
+        PROFILE_EVENT,
+        handleChange
+      );
+    };
   }, []);
 
-  if (!user) {
-    return (
-      <div className="rounded-2xl bg-white p-6 shadow-sm dark:bg-navy-800">
-        <p className="text-sm font-medium text-gray-500 dark:text-gray-300">
-          Unable to load the current user profile.
-        </p>
-      </div>
-    );
-  }
+  const name = profile?.name || sessionUser?.name || "";
 
-  const formatDateTime = (timestamp) => {
-    if (!timestamp) {
-      return "—";
-    }
+  const adminId =
+    profile?.adminId ||
+    sessionUser?.adminId ||
+    sessionUser?.username ||
+    "";
 
-    return new Date(timestamp).toLocaleString();
-  };
+  const role = profile?.role || sessionUser?.role || "";
+
+  const phone = profile?.phone || "";
+
+  const avatar = profile?.avatar || "";
+
+  const isActive =
+    profile?.isActive !== false &&
+    sessionUser?.is_active !== false;
 
   return (
-    <div className="space-y-5">
-
+    <div className="mx-auto w-full max-w-4xl space-y-5">
       {/* =================================================
-          PROFILE HEADER
+          WHO AM I
           ================================================= */}
 
-      <div className="rounded-2xl bg-white p-6 shadow-sm dark:bg-navy-800">
-
-        <div className="flex flex-col gap-5 md:flex-row md:items-center">
-
-          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-brand-500 text-2xl font-bold text-white shadow-lg">
-            {user.role === "Port Administrator"
-              ? "PA"
-              : user.role === "Marine Officer"
-              ? "MO"
-              : user.role === "Port Manager"
-              ? "PM"
-              : user.role === "Cargo Officer"
-              ? "CO"
-              : user.role === "Gate & Security Officer"
-              ? "GS"
-              : user.role === "Maintenance Officer"
-              ? "MT"
-              : user.role === "Executive"
-              ? "PE"
-              : "PU"}
+      <section className="rounded-2xl bg-white p-6 shadow-sm dark:bg-navy-800">
+        <div className="flex flex-wrap items-center gap-6">
+          <div
+            data-testid="profile-avatar"
+            className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-3xl bg-brand-500 text-3xl font-bold text-white shadow-lg shadow-brand-500/20"
+          >
+            {avatar ? (
+              <img
+                src={avatar}
+                alt="Your profile"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              initialsOf(name)
+            )}
           </div>
 
-          <div>
-            <p className="text-2xl font-bold text-navy-700 dark:text-white">
-              {user.role}
-            </p>
+          <div className="min-w-[11rem] flex-1">
+            <h2 className="break-words text-2xl font-bold text-navy-700 dark:text-white">
+              {name || "Port employee"}
+            </h2>
 
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-300">
-              {user.department}
-            </p>
+            {role && (
+              <p className="mt-1 text-sm font-semibold text-gray-500 dark:text-gray-300">
+                {role}
+              </p>
+            )}
 
-            <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-600 dark:bg-green-500/10 dark:text-green-400">
-              <MdVerifiedUser className="h-4 w-4" />
-              Active Account
-            </div>
+            <span
+              className={`mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold ${
+                isActive
+                  ? "bg-green-50 text-green-600 dark:bg-green-500/10 dark:text-green-400"
+                  : "bg-red-50 text-red-500 dark:bg-red-500/10 dark:text-red-400"
+              }`}
+            >
+              {isActive ? <MdVerifiedUser /> : <MdBlock />}
+
+              {isActive
+                ? "Active Account"
+                : "Disabled Account"}
+            </span>
           </div>
 
+          <Link
+            to="/admin/account-settings"
+            className="flex items-center gap-2 rounded-xl bg-brand-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-brand-500/20 transition hover:bg-brand-600"
+          >
+            <MdEdit className="h-5 w-5" />
+            Edit Profile
+          </Link>
         </div>
 
-      </div>
+        {problem && (
+          <p className="mt-5 text-xs text-amber-600 dark:text-amber-400">
+            Your profile picture and phone number could not be
+            loaded right now.
+          </p>
+        )}
+      </section>
 
       {/* =================================================
           ACCOUNT INFORMATION
           ================================================= */}
 
-      <div className="rounded-2xl bg-white p-6 shadow-sm dark:bg-navy-800">
-
+      <section className="rounded-2xl bg-white p-6 shadow-sm dark:bg-navy-800">
         <div className="mb-5 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500/10 text-brand-500">
             <MdPerson className="h-5 w-5" />
@@ -117,138 +193,26 @@ const MyProfile = () => {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-
-          <InfoItem
-            icon={<MdBadge />}
-            label="Admin ID"
-            value={user.adminId}
-          />
-
-          <InfoItem
-            icon={<MdPerson />}
-            label="Designation"
-            value={user.role}
-          />
-
-          <InfoItem
-            icon={<MdBusiness />}
-            label="Department"
-            value={user.department}
-          />
-
-          <InfoItem
-            icon={<MdEmail />}
-            label="Email Address"
-            value={user.email}
-          />
-
-        </div>
-
-      </div>
-
-      {/* =================================================
-          CURRENT SESSION
-          ================================================= */}
-
-      <div className="rounded-2xl bg-white p-6 shadow-sm dark:bg-navy-800">
-
-        <div className="mb-5 flex items-center gap-3">
-
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-500">
-            <MdAccessTime className="h-5 w-5" />
-          </div>
-
-          <div>
-            <h2 className="text-lg font-bold text-navy-700 dark:text-white">
-              Current Session
-            </h2>
-
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Information about this browser session
-            </p>
-          </div>
-
-        </div>
-
         <div className="grid gap-4 md:grid-cols-3">
-
-          <InfoItem
-            label="Session Status"
-            value="Active"
-            status
+          <InfoTile
+            icon={<MdKey className="text-base" />}
+            label="Admin ID"
+            value={adminId}
           />
 
-          <InfoItem
-            label="Login Time"
-            value={formatDateTime(session?.loginTime)}
+          <InfoTile
+            icon={<MdWork className="text-base" />}
+            label="Designation"
+            value={role}
           />
 
-          <InfoItem
-            label="Last Activity"
-            value={formatDateTime(session?.lastActivity)}
+          <InfoTile
+            icon={<MdPhone className="text-base" />}
+            label="Phone Number"
+            value={phone}
           />
-
         </div>
-
-      </div>
-
-      {/* =================================================
-          SECURITY NOTICE
-          ================================================= */}
-
-      <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5 dark:border-blue-500/20 dark:bg-blue-500/10">
-
-        <p className="text-sm font-semibold text-blue-700 dark:text-blue-300">
-          Profile information is controlled by the Port
-          Administration system.
-        </p>
-
-        <p className="mt-1 text-xs leading-5 text-blue-600 dark:text-blue-200">
-          Role, designation and department changes are
-          managed through User & Role Management.
-        </p>
-
-      </div>
-
-    </div>
-  );
-};
-
-// =========================================================
-// INFORMATION ITEM
-// =========================================================
-
-const InfoItem = ({
-  icon,
-  label,
-  value,
-  status = false,
-}) => {
-  return (
-    <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-white/5 dark:bg-navy-900">
-
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-        {icon && (
-          <span className="text-base">
-            {icon}
-          </span>
-        )}
-
-        {label}
-      </div>
-
-      {status ? (
-        <div className="mt-2 flex items-center gap-2 text-sm font-bold text-green-500">
-          <span className="h-2 w-2 rounded-full bg-green-500" />
-          {value}
-        </div>
-      ) : (
-        <p className="mt-2 break-words text-sm font-semibold text-navy-700 dark:text-white">
-          {value || "—"}
-        </p>
-      )}
-
+      </section>
     </div>
   );
 };

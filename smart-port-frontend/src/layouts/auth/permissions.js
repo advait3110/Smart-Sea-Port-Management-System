@@ -1,71 +1,49 @@
-// =========================================================
-// KARWAR PORT
+// ============================================================
+// PORT OF SINGAPORE
 // ROLE-BASED ACCESS CONTROL (RBAC)
-// =========================================================
+// ============================================================
 //
-// This file defines the permissions available in the
-// Karwar Port Smart Sea Port Management System.
+// PostgreSQL / FastAPI permissions are authoritative.
+//
+// Backend module permissions:
+// dashboard
+// port_map
+// weather
+// vessels
+// berths
+// cargo
+// gate_trucks
+// port_communication
+// notifications
+// port_alerts
+// incidents
+// asset_maintenance
+// analytics
+// documents
+// audit_logs
+// user_role_management
 //
 // IMPORTANT:
-// - Users are stored separately in users.js.
-// - Roles determine which permissions a user receives.
-// - Permissions determine what the user can VIEW, CREATE,
-//   EDIT, DELETE, APPROVE or MANAGE.
-//
-// DEVELOPMENT:
-//   Permissions are defined locally for the frontend.
-//
-// PRODUCTION:
-//   These permissions should eventually be stored in
-//   PostgreSQL and managed through FastAPI.
-//
-// =========================================================
+// If backend explicitly returns:
+//     permissions: []
+// the user has ZERO permissions.
+// There is NO static-role fallback in that case,
+// and NO role name (including administrator) grants
+// access on its own.
+// ============================================================
 
-
-// =========================================================
+// ============================================================
 // PERMISSION DEFINITIONS
-// =========================================================
-//
-// Naming convention:
-//
-// module.action
-//
-// Examples:
-// vessel.view
-// vessel.create
-// vessel.edit
-// vessel.delete
-//
-// =========================================================
+// ============================================================
 
 export const PERMISSIONS = {
-
-  // -------------------------------------------------------
-  // PORT DASHBOARD
-  // -------------------------------------------------------
-
   DASHBOARD_VIEW: "dashboard.view",
-
-
-  // -------------------------------------------------------
-  // LIVE PORT MAP
-  // -------------------------------------------------------
 
   PORT_MAP_VIEW: "port_map.view",
   PORT_MAP_MANAGE: "port_map.manage",
 
-
-  // -------------------------------------------------------
-  // WEATHER & MARINE CONDITIONS
-  // -------------------------------------------------------
-
   WEATHER_VIEW: "weather.view",
   WEATHER_MANAGE: "weather.manage",
-
-
-  // -------------------------------------------------------
-  // VESSEL MANAGEMENT
-  // -------------------------------------------------------
 
   VESSEL_VIEW: "vessel.view",
   VESSEL_CREATE: "vessel.create",
@@ -73,21 +51,11 @@ export const PERMISSIONS = {
   VESSEL_DELETE: "vessel.delete",
   VESSEL_APPROVE: "vessel.approve",
 
-
-  // -------------------------------------------------------
-  // BERTH MANAGEMENT
-  // -------------------------------------------------------
-
   BERTH_VIEW: "berth.view",
   BERTH_CREATE: "berth.create",
   BERTH_EDIT: "berth.edit",
   BERTH_DELETE: "berth.delete",
   BERTH_ALLOCATE: "berth.allocate",
-
-
-  // -------------------------------------------------------
-  // CARGO OPERATIONS
-  // -------------------------------------------------------
 
   CARGO_VIEW: "cargo.view",
   CARGO_CREATE: "cargo.create",
@@ -95,49 +63,24 @@ export const PERMISSIONS = {
   CARGO_DELETE: "cargo.delete",
   CARGO_APPROVE: "cargo.approve",
 
-
-  // -------------------------------------------------------
-  // GATE & TRUCK MANAGEMENT
-  // -------------------------------------------------------
-
   GATE_VIEW: "gate.view",
   GATE_CREATE: "gate.create",
   GATE_EDIT: "gate.edit",
   GATE_DELETE: "gate.delete",
   GATE_APPROVE: "gate.approve",
 
-
-  // -------------------------------------------------------
-  // PORT COMMUNICATION
-  // -------------------------------------------------------
-
   COMMUNICATION_VIEW: "communication.view",
   COMMUNICATION_SEND: "communication.send",
   COMMUNICATION_MANAGE: "communication.manage",
 
-
-  // -------------------------------------------------------
-  // NOTIFICATIONS
-  // -------------------------------------------------------
-
   NOTIFICATIONS_VIEW: "notifications.view",
   NOTIFICATIONS_MANAGE: "notifications.manage",
-
-
-  // -------------------------------------------------------
-  // PORT ALERTS
-  // -------------------------------------------------------
 
   ALERTS_VIEW: "alerts.view",
   ALERTS_CREATE: "alerts.create",
   ALERTS_EDIT: "alerts.edit",
   ALERTS_DELETE: "alerts.delete",
   ALERTS_ACKNOWLEDGE: "alerts.acknowledge",
-
-
-  // -------------------------------------------------------
-  // INCIDENT MANAGEMENT
-  // -------------------------------------------------------
 
   INCIDENT_VIEW: "incident.view",
   INCIDENT_CREATE: "incident.create",
@@ -146,11 +89,6 @@ export const PERMISSIONS = {
   INCIDENT_ASSIGN: "incident.assign",
   INCIDENT_CLOSE: "incident.close",
 
-
-  // -------------------------------------------------------
-  // ASSET & MAINTENANCE
-  // -------------------------------------------------------
-
   MAINTENANCE_VIEW: "maintenance.view",
   MAINTENANCE_CREATE: "maintenance.create",
   MAINTENANCE_EDIT: "maintenance.edit",
@@ -158,19 +96,9 @@ export const PERMISSIONS = {
   MAINTENANCE_ASSIGN: "maintenance.assign",
   MAINTENANCE_APPROVE: "maintenance.approve",
 
-
-  // -------------------------------------------------------
-  // PORT ANALYTICS
-  // -------------------------------------------------------
-
   ANALYTICS_VIEW: "analytics.view",
   ANALYTICS_EXPORT: "analytics.export",
   ANALYTICS_MANAGE: "analytics.manage",
-
-
-  // -------------------------------------------------------
-  // DOCUMENT MANAGEMENT
-  // -------------------------------------------------------
 
   DOCUMENT_VIEW: "document.view",
   DOCUMENT_UPLOAD: "document.upload",
@@ -179,19 +107,9 @@ export const PERMISSIONS = {
   DOCUMENT_APPROVE: "document.approve",
   DOCUMENT_DOWNLOAD: "document.download",
 
-
-  // -------------------------------------------------------
-  // AUDIT LOGS
-  // -------------------------------------------------------
-
   AUDIT_VIEW: "audit.view",
   AUDIT_EXPORT: "audit.export",
   AUDIT_MANAGE: "audit.manage",
-
-
-  // -------------------------------------------------------
-  // USER & ROLE MANAGEMENT
-  // -------------------------------------------------------
 
   USERS_VIEW: "users.view",
   USERS_CREATE: "users.create",
@@ -206,128 +124,141 @@ export const PERMISSIONS = {
   ROLES_EDIT: "roles.edit",
   ROLES_DELETE: "roles.delete",
   ROLES_ASSIGN_PERMISSIONS: "roles.assign_permissions",
-
 };
 
+// ============================================================
+// BACKEND MODULE PERMISSIONS
+// ============================================================
 
-// =========================================================
-// ROLE PERMISSIONS
-// =========================================================
-//
-// Each role receives a specific set of permissions.
-//
-// IMPORTANT:
-// Do NOT give every role every permission.
-//
-// This is the foundation of RBAC.
-//
-// =========================================================
+export const BACKEND_MODULE_PERMISSIONS = [
+  "dashboard",
+  "port_map",
+  "weather",
+  "vessels",
+  "berths",
+  "cargo",
+  "gate_trucks",
+  "port_communication",
+  "notifications",
+  "port_alerts",
+  "incidents",
+  "asset_maintenance",
+  "analytics",
+  "documents",
+  "audit_logs",
+  "user_role_management",
+];
 
+// ============================================================
+// MODULE → GRANULAR PERMISSION MAPPING
+// ============================================================
 
-export const ROLE_PERMISSIONS = {
-
-  // =======================================================
-  // PORT ADMINISTRATOR
-  // =======================================================
-  //
-  // Highest administrative access.
-  //
-  // Responsible for system administration, users, roles,
-  // security, audit and operational oversight.
-  // =======================================================
-
-  "Port Administrator": [
-
-    // Dashboard
+export const MODULE_PERMISSIONS = {
+  dashboard: [
     PERMISSIONS.DASHBOARD_VIEW,
+  ],
 
-    // Port Map
+  port_map: [
     PERMISSIONS.PORT_MAP_VIEW,
     PERMISSIONS.PORT_MAP_MANAGE,
+  ],
 
-    // Weather
+  weather: [
     PERMISSIONS.WEATHER_VIEW,
     PERMISSIONS.WEATHER_MANAGE,
+  ],
 
-    // Vessels
+  vessels: [
     PERMISSIONS.VESSEL_VIEW,
     PERMISSIONS.VESSEL_CREATE,
     PERMISSIONS.VESSEL_EDIT,
     PERMISSIONS.VESSEL_DELETE,
     PERMISSIONS.VESSEL_APPROVE,
+  ],
 
-    // Berths
+  berths: [
     PERMISSIONS.BERTH_VIEW,
     PERMISSIONS.BERTH_CREATE,
     PERMISSIONS.BERTH_EDIT,
     PERMISSIONS.BERTH_DELETE,
     PERMISSIONS.BERTH_ALLOCATE,
+  ],
 
-    // Cargo
+  cargo: [
     PERMISSIONS.CARGO_VIEW,
     PERMISSIONS.CARGO_CREATE,
     PERMISSIONS.CARGO_EDIT,
     PERMISSIONS.CARGO_DELETE,
     PERMISSIONS.CARGO_APPROVE,
+  ],
 
-    // Gate
+  gate_trucks: [
     PERMISSIONS.GATE_VIEW,
     PERMISSIONS.GATE_CREATE,
     PERMISSIONS.GATE_EDIT,
     PERMISSIONS.GATE_DELETE,
     PERMISSIONS.GATE_APPROVE,
+  ],
 
-    // Communication
+  port_communication: [
     PERMISSIONS.COMMUNICATION_VIEW,
     PERMISSIONS.COMMUNICATION_SEND,
     PERMISSIONS.COMMUNICATION_MANAGE,
+  ],
 
-    // Notifications
+  notifications: [
     PERMISSIONS.NOTIFICATIONS_VIEW,
     PERMISSIONS.NOTIFICATIONS_MANAGE,
+  ],
 
-    // Alerts
+  port_alerts: [
     PERMISSIONS.ALERTS_VIEW,
     PERMISSIONS.ALERTS_CREATE,
     PERMISSIONS.ALERTS_EDIT,
     PERMISSIONS.ALERTS_DELETE,
     PERMISSIONS.ALERTS_ACKNOWLEDGE,
+  ],
 
-    // Incidents
+  incidents: [
     PERMISSIONS.INCIDENT_VIEW,
     PERMISSIONS.INCIDENT_CREATE,
     PERMISSIONS.INCIDENT_EDIT,
     PERMISSIONS.INCIDENT_DELETE,
     PERMISSIONS.INCIDENT_ASSIGN,
     PERMISSIONS.INCIDENT_CLOSE,
+  ],
 
-    // Maintenance
+  asset_maintenance: [
     PERMISSIONS.MAINTENANCE_VIEW,
     PERMISSIONS.MAINTENANCE_CREATE,
     PERMISSIONS.MAINTENANCE_EDIT,
     PERMISSIONS.MAINTENANCE_DELETE,
     PERMISSIONS.MAINTENANCE_ASSIGN,
     PERMISSIONS.MAINTENANCE_APPROVE,
+  ],
 
-    // Analytics
+  analytics: [
     PERMISSIONS.ANALYTICS_VIEW,
     PERMISSIONS.ANALYTICS_EXPORT,
     PERMISSIONS.ANALYTICS_MANAGE,
+  ],
 
-    // Documents
+  documents: [
     PERMISSIONS.DOCUMENT_VIEW,
     PERMISSIONS.DOCUMENT_UPLOAD,
     PERMISSIONS.DOCUMENT_EDIT,
     PERMISSIONS.DOCUMENT_DELETE,
     PERMISSIONS.DOCUMENT_APPROVE,
     PERMISSIONS.DOCUMENT_DOWNLOAD,
+  ],
 
-    // Audit
+  audit_logs: [
     PERMISSIONS.AUDIT_VIEW,
     PERMISSIONS.AUDIT_EXPORT,
     PERMISSIONS.AUDIT_MANAGE,
+  ],
 
-    // Users
+  user_role_management: [
     PERMISSIONS.USERS_VIEW,
     PERMISSIONS.USERS_CREATE,
     PERMISSIONS.USERS_EDIT,
@@ -336,56 +267,195 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.USERS_DISABLE,
     PERMISSIONS.USERS_ASSIGN_ROLE,
 
-    // Roles
     PERMISSIONS.ROLES_VIEW,
     PERMISSIONS.ROLES_CREATE,
     PERMISSIONS.ROLES_EDIT,
     PERMISSIONS.ROLES_DELETE,
     PERMISSIONS.ROLES_ASSIGN_PERMISSIONS,
-
   ],
+};
 
+// ============================================================
+// MODULE VIEW PERMISSION
+// ============================================================
 
-  // =======================================================
-  // PORT MANAGER
-  // =======================================================
+const MODULE_VIEW_PERMISSION = {
+  dashboard: PERMISSIONS.DASHBOARD_VIEW,
+  port_map: PERMISSIONS.PORT_MAP_VIEW,
+  weather: PERMISSIONS.WEATHER_VIEW,
+  vessels: PERMISSIONS.VESSEL_VIEW,
+  berths: PERMISSIONS.BERTH_VIEW,
+  cargo: PERMISSIONS.CARGO_VIEW,
+  gate_trucks: PERMISSIONS.GATE_VIEW,
+  port_communication: PERMISSIONS.COMMUNICATION_VIEW,
+  notifications: PERMISSIONS.NOTIFICATIONS_VIEW,
+  port_alerts: PERMISSIONS.ALERTS_VIEW,
+  incidents: PERMISSIONS.INCIDENT_VIEW,
+  asset_maintenance: PERMISSIONS.MAINTENANCE_VIEW,
+  analytics: PERMISSIONS.ANALYTICS_VIEW,
+  documents: PERMISSIONS.DOCUMENT_VIEW,
+  audit_logs: PERMISSIONS.AUDIT_VIEW,
+  user_role_management: PERMISSIONS.USERS_VIEW,
+};
 
-  "Port Manager": [
+// ============================================================
+// MODULE ALIASES
+// ============================================================
 
+const MODULE_ALIASES = {
+  dashboard: "dashboard",
+  "dashboard.view": "dashboard",
+
+  port_map: "port_map",
+  "port-map": "port_map",
+  "port_map.view": "port_map",
+  "port_map.manage": "port_map",
+
+  weather: "weather",
+  "weather.view": "weather",
+  "weather.manage": "weather",
+
+  vessels: "vessels",
+  vessel: "vessels",
+  "vessel.view": "vessels",
+  "vessel.create": "vessels",
+  "vessel.edit": "vessels",
+  "vessel.delete": "vessels",
+  "vessel.approve": "vessels",
+
+  berths: "berths",
+  berth: "berths",
+  "berth.view": "berths",
+  "berth.create": "berths",
+  "berth.edit": "berths",
+  "berth.delete": "berths",
+  "berth.allocate": "berths",
+
+  cargo: "cargo",
+  "cargo.view": "cargo",
+  "cargo.create": "cargo",
+  "cargo.edit": "cargo",
+  "cargo.delete": "cargo",
+  "cargo.approve": "cargo",
+
+  gate: "gate_trucks",
+  gate_trucks: "gate_trucks",
+  "gate-trucks": "gate_trucks",
+  "gate.view": "gate_trucks",
+  "gate.create": "gate_trucks",
+  "gate.edit": "gate_trucks",
+  "gate.delete": "gate_trucks",
+  "gate.approve": "gate_trucks",
+
+  port_communication: "port_communication",
+  "port-communication": "port_communication",
+  communication: "port_communication",
+  "communication.view": "port_communication",
+  "communication.send": "port_communication",
+  "communication.manage": "port_communication",
+
+  notifications: "notifications",
+  notification: "notifications",
+  "notifications.view": "notifications",
+  "notifications.manage": "notifications",
+
+  alerts: "port_alerts",
+  port_alerts: "port_alerts",
+  "port-alerts": "port_alerts",
+  "alerts.view": "port_alerts",
+  "alerts.create": "port_alerts",
+  "alerts.edit": "port_alerts",
+  "alerts.delete": "port_alerts",
+  "alerts.acknowledge": "port_alerts",
+
+  incidents: "incidents",
+  incident: "incidents",
+  "incident.view": "incidents",
+  "incident.create": "incidents",
+  "incident.edit": "incidents",
+  "incident.delete": "incidents",
+  "incident.assign": "incidents",
+  "incident.close": "incidents",
+
+  asset_maintenance: "asset_maintenance",
+  maintenance: "asset_maintenance",
+  "asset-maintenance": "asset_maintenance",
+  "maintenance.view": "asset_maintenance",
+  "maintenance.create": "asset_maintenance",
+  "maintenance.edit": "asset_maintenance",
+  "maintenance.delete": "asset_maintenance",
+  "maintenance.assign": "asset_maintenance",
+  "maintenance.approve": "asset_maintenance",
+
+  analytics: "analytics",
+  "analytics.view": "analytics",
+  "analytics.export": "analytics",
+  "analytics.manage": "analytics",
+
+  documents: "documents",
+  document: "documents",
+  "documents.view": "documents",
+  "document.view": "documents",
+  "document.upload": "documents",
+  "document.edit": "documents",
+  "document.delete": "documents",
+  "document.approve": "documents",
+  "document.download": "documents",
+
+  audit_logs: "audit_logs",
+  "audit-logs": "audit_logs",
+  audit: "audit_logs",
+  "audit.logs": "audit_logs",
+  "audit.view": "audit_logs",
+  "audit.export": "audit_logs",
+  "audit.manage": "audit_logs",
+
+  user_role_management: "user_role_management",
+  "user-role-management": "user_role_management",
+  users: "user_role_management",
+  roles: "user_role_management",
+};
+
+// ============================================================
+// FIXED ROLE PERMISSIONS
+// ============================================================
+//
+// Compatibility only.
+// Runtime authorization comes from backend permissions.
+//
+// ============================================================
+
+export const ROLE_PERMISSIONS = {
+  "Port Administrator":
+    Object.values(PERMISSIONS),
+
+  "Port Operations Manager": [
     PERMISSIONS.DASHBOARD_VIEW,
-
     PERMISSIONS.PORT_MAP_VIEW,
-
     PERMISSIONS.WEATHER_VIEW,
 
-    // Vessels
     PERMISSIONS.VESSEL_VIEW,
     PERMISSIONS.VESSEL_CREATE,
     PERMISSIONS.VESSEL_EDIT,
     PERMISSIONS.VESSEL_APPROVE,
 
-    // Berths
     PERMISSIONS.BERTH_VIEW,
     PERMISSIONS.BERTH_CREATE,
     PERMISSIONS.BERTH_EDIT,
     PERMISSIONS.BERTH_ALLOCATE,
 
-    // Cargo
     PERMISSIONS.CARGO_VIEW,
     PERMISSIONS.CARGO_CREATE,
     PERMISSIONS.CARGO_EDIT,
     PERMISSIONS.CARGO_APPROVE,
 
-    // Gate
     PERMISSIONS.GATE_VIEW,
 
-    // Communication
     PERMISSIONS.COMMUNICATION_VIEW,
     PERMISSIONS.COMMUNICATION_SEND,
 
     PERMISSIONS.NOTIFICATIONS_VIEW,
 
-    // Safety
     PERMISSIONS.ALERTS_VIEW,
     PERMISSIONS.ALERTS_ACKNOWLEDGE,
 
@@ -395,50 +465,34 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.INCIDENT_ASSIGN,
     PERMISSIONS.INCIDENT_CLOSE,
 
-    // Maintenance - oversight
     PERMISSIONS.MAINTENANCE_VIEW,
 
-    // Analytics
     PERMISSIONS.ANALYTICS_VIEW,
     PERMISSIONS.ANALYTICS_EXPORT,
 
-    // Documents
     PERMISSIONS.DOCUMENT_VIEW,
     PERMISSIONS.DOCUMENT_DOWNLOAD,
-
   ],
 
-
-  // =======================================================
-  // MARINE OFFICER
-  // =======================================================
-
-  "Marine Officer": [
-
+  "Vessel Management Officer": [
     PERMISSIONS.DASHBOARD_VIEW,
-
     PERMISSIONS.PORT_MAP_VIEW,
-
     PERMISSIONS.WEATHER_VIEW,
 
-    // Vessels
     PERMISSIONS.VESSEL_VIEW,
     PERMISSIONS.VESSEL_CREATE,
     PERMISSIONS.VESSEL_EDIT,
     PERMISSIONS.VESSEL_APPROVE,
 
-    // Berths
     PERMISSIONS.BERTH_VIEW,
     PERMISSIONS.BERTH_EDIT,
     PERMISSIONS.BERTH_ALLOCATE,
 
-    // Communication
     PERMISSIONS.COMMUNICATION_VIEW,
     PERMISSIONS.COMMUNICATION_SEND,
 
     PERMISSIONS.NOTIFICATIONS_VIEW,
 
-    // Safety
     PERMISSIONS.ALERTS_VIEW,
     PERMISSIONS.ALERTS_ACKNOWLEDGE,
 
@@ -446,128 +500,112 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.INCIDENT_CREATE,
     PERMISSIONS.INCIDENT_EDIT,
 
-    // Analytics
     PERMISSIONS.ANALYTICS_VIEW,
 
-    // Documents
     PERMISSIONS.DOCUMENT_VIEW,
     PERMISSIONS.DOCUMENT_UPLOAD,
     PERMISSIONS.DOCUMENT_DOWNLOAD,
-
   ],
 
-
-  // =======================================================
-  // CARGO OFFICER
-  // =======================================================
-
   "Cargo Officer": [
-
     PERMISSIONS.DASHBOARD_VIEW,
-
     PERMISSIONS.PORT_MAP_VIEW,
 
-    // Vessel information - read only
     PERMISSIONS.VESSEL_VIEW,
 
-    // Berth information - read only
     PERMISSIONS.BERTH_VIEW,
 
-    // Cargo
     PERMISSIONS.CARGO_VIEW,
     PERMISSIONS.CARGO_CREATE,
     PERMISSIONS.CARGO_EDIT,
     PERMISSIONS.CARGO_APPROVE,
 
-    // Gate information
     PERMISSIONS.GATE_VIEW,
 
-    // Communication
     PERMISSIONS.COMMUNICATION_VIEW,
     PERMISSIONS.COMMUNICATION_SEND,
 
     PERMISSIONS.NOTIFICATIONS_VIEW,
 
-    // Alerts
     PERMISSIONS.ALERTS_VIEW,
     PERMISSIONS.ALERTS_ACKNOWLEDGE,
 
-    // Incidents
     PERMISSIONS.INCIDENT_VIEW,
     PERMISSIONS.INCIDENT_CREATE,
 
-    // Analytics
     PERMISSIONS.ANALYTICS_VIEW,
 
-    // Documents
     PERMISSIONS.DOCUMENT_VIEW,
     PERMISSIONS.DOCUMENT_UPLOAD,
     PERMISSIONS.DOCUMENT_DOWNLOAD,
-
   ],
 
-
-  // =======================================================
-  // GATE & SECURITY OFFICER
-  // =======================================================
-
-  "Gate & Security Officer": [
-
+  "Gate & Truck Officer": [
     PERMISSIONS.DASHBOARD_VIEW,
-
     PERMISSIONS.PORT_MAP_VIEW,
 
-    // Gate
     PERMISSIONS.GATE_VIEW,
     PERMISSIONS.GATE_CREATE,
     PERMISSIONS.GATE_EDIT,
     PERMISSIONS.GATE_APPROVE,
 
-    // Vessel information
     PERMISSIONS.VESSEL_VIEW,
 
-    // Communication
+    PERMISSIONS.CARGO_VIEW,
+
     PERMISSIONS.COMMUNICATION_VIEW,
     PERMISSIONS.COMMUNICATION_SEND,
 
     PERMISSIONS.NOTIFICATIONS_VIEW,
 
-    // Security / Alerts
     PERMISSIONS.ALERTS_VIEW,
-    PERMISSIONS.ALERTS_CREATE,
     PERMISSIONS.ALERTS_ACKNOWLEDGE,
 
-    // Incidents
+    PERMISSIONS.INCIDENT_VIEW,
+    PERMISSIONS.INCIDENT_CREATE,
+    PERMISSIONS.INCIDENT_EDIT,
+
+    PERMISSIONS.DOCUMENT_VIEW,
+    PERMISSIONS.DOCUMENT_UPLOAD,
+    PERMISSIONS.DOCUMENT_DOWNLOAD,
+  ],
+
+  "Security Officer": [
+    PERMISSIONS.DASHBOARD_VIEW,
+    PERMISSIONS.PORT_MAP_VIEW,
+
+    PERMISSIONS.VESSEL_VIEW,
+
+    PERMISSIONS.GATE_VIEW,
+
+    PERMISSIONS.COMMUNICATION_VIEW,
+    PERMISSIONS.COMMUNICATION_SEND,
+
+    PERMISSIONS.NOTIFICATIONS_VIEW,
+
+    PERMISSIONS.ALERTS_VIEW,
+    PERMISSIONS.ALERTS_CREATE,
+    PERMISSIONS.ALERTS_EDIT,
+    PERMISSIONS.ALERTS_ACKNOWLEDGE,
+
     PERMISSIONS.INCIDENT_VIEW,
     PERMISSIONS.INCIDENT_CREATE,
     PERMISSIONS.INCIDENT_EDIT,
     PERMISSIONS.INCIDENT_ASSIGN,
     PERMISSIONS.INCIDENT_CLOSE,
 
-    // Documents
     PERMISSIONS.DOCUMENT_VIEW,
     PERMISSIONS.DOCUMENT_UPLOAD,
     PERMISSIONS.DOCUMENT_DOWNLOAD,
 
-    // Audit - restricted operational view
     PERMISSIONS.AUDIT_VIEW,
-
   ],
 
-
-  // =======================================================
-  // MAINTENANCE OFFICER
-  // =======================================================
-
   "Maintenance Officer": [
-
     PERMISSIONS.DASHBOARD_VIEW,
-
     PERMISSIONS.PORT_MAP_VIEW,
-
     PERMISSIONS.WEATHER_VIEW,
 
-    // Maintenance
     PERMISSIONS.MAINTENANCE_VIEW,
     PERMISSIONS.MAINTENANCE_CREATE,
     PERMISSIONS.MAINTENANCE_EDIT,
@@ -575,52 +613,32 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.MAINTENANCE_ASSIGN,
     PERMISSIONS.MAINTENANCE_APPROVE,
 
-    // Incidents
     PERMISSIONS.INCIDENT_VIEW,
     PERMISSIONS.INCIDENT_CREATE,
     PERMISSIONS.INCIDENT_EDIT,
 
-    // Alerts
     PERMISSIONS.ALERTS_VIEW,
     PERMISSIONS.ALERTS_ACKNOWLEDGE,
 
-    // Communication
     PERMISSIONS.COMMUNICATION_VIEW,
     PERMISSIONS.COMMUNICATION_SEND,
 
     PERMISSIONS.NOTIFICATIONS_VIEW,
 
-    // Analytics
     PERMISSIONS.ANALYTICS_VIEW,
 
-    // Documents
     PERMISSIONS.DOCUMENT_VIEW,
     PERMISSIONS.DOCUMENT_UPLOAD,
     PERMISSIONS.DOCUMENT_DOWNLOAD,
-
   ],
 
-
-  // =======================================================
-  // EXECUTIVE
-  // =======================================================
-
-  "Executive": [
-
-    // Executive is primarily an oversight/read-only role.
-
+  "Port Executive": [
     PERMISSIONS.DASHBOARD_VIEW,
-
     PERMISSIONS.PORT_MAP_VIEW,
 
-    PERMISSIONS.WEATHER_VIEW,
-
     PERMISSIONS.VESSEL_VIEW,
-
     PERMISSIONS.BERTH_VIEW,
-
     PERMISSIONS.CARGO_VIEW,
-
     PERMISSIONS.GATE_VIEW,
 
     PERMISSIONS.COMMUNICATION_VIEW,
@@ -631,155 +649,487 @@ export const ROLE_PERMISSIONS = {
 
     PERMISSIONS.INCIDENT_VIEW,
 
-    PERMISSIONS.MAINTENANCE_VIEW,
-
-    // Analytics
     PERMISSIONS.ANALYTICS_VIEW,
     PERMISSIONS.ANALYTICS_EXPORT,
 
-    // Documents
     PERMISSIONS.DOCUMENT_VIEW,
     PERMISSIONS.DOCUMENT_DOWNLOAD,
-
   ],
-
 };
 
+// ============================================================
+// NORMALIZE PERMISSION VALUE
+// ============================================================
 
-// =========================================================
-// GET PERMISSIONS FOR A ROLE
-// =========================================================
+export const normalizePermissionValue = (
+  value
+) => {
+  if (!value) {
+    return null;
+  }
 
-export const getRolePermissions = (role) => {
+  if (typeof value === "object") {
+    if (
+      typeof value.key === "string"
+    ) {
+      return normalizePermissionValue(
+        value.key
+      );
+    }
+
+    if (
+      typeof value.permission ===
+      "string"
+    ) {
+      return normalizePermissionValue(
+        value.permission
+      );
+    }
+
+    if (
+      typeof value.name === "string"
+    ) {
+      return normalizePermissionValue(
+        value.name
+      );
+    }
+
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+};
+
+// ============================================================
+// NORMALIZE USER PERMISSIONS
+// ============================================================
+
+export const normalizeUserPermissions = (
+  permissions
+) => {
+  if (!Array.isArray(permissions)) {
+    return [];
+  }
+
+  return [
+    ...new Set(
+      permissions
+        .map(
+          normalizePermissionValue
+        )
+        .filter(Boolean)
+    ),
+  ];
+};
+
+// ============================================================
+// GET ROLE PERMISSIONS
+// ============================================================
+//
+// Compatibility only.
+// ============================================================
+
+export const getRolePermissions = (
+  role
+) => {
+  if (!role) {
+    return [];
+  }
 
   return ROLE_PERMISSIONS[role] || [];
-
 };
 
+// ============================================================
+// CHECK PORT ADMINISTRATOR
+// ============================================================
+//
+// Informational only (for example, to show a role badge).
+//
+// SECURITY: this must NEVER be used to grant access.
+// Access comes only from the backend permission list.
+// ============================================================
 
-// =========================================================
-// CHECK WHETHER A ROLE HAS A PERMISSION
-// =========================================================
-
-export const roleHasPermission = (
-  role,
-  permission
+export const isPortAdministrator = (
+  user
 ) => {
+  if (!user) {
+    return false;
+  }
 
-  const permissions =
-    getRolePermissions(role);
+  const role =
+    user.role ||
+    user.backendRole ||
+    user.employeeRole;
 
-  return permissions.includes(permission);
+  if (typeof role !== "string") {
+    return false;
+  }
 
+  const normalizedRole = role
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+  return (
+    normalizedRole ===
+      "port_administrator" ||
+    normalizedRole === "admin" ||
+    normalizedRole ===
+      "port_administration"
+  );
 };
 
+// ============================================================
+// EXTRACT BACKEND PERMISSIONS
+// ============================================================
 
-// =========================================================
-// CHECK WHETHER A USER HAS A PERMISSION
-// =========================================================
+const extractBackendPermissions = (
+  user
+) => {
+  if (!user) {
+    return null;
+  }
+
+  /*
+   * role_permissions has priority.
+   */
+  if (
+    Array.isArray(
+      user.role_permissions
+    )
+  ) {
+    return normalizeUserPermissions(
+      user.role_permissions
+    );
+  }
+
+  /*
+   * Compatibility with permissions.
+   */
+  if (
+    Array.isArray(
+      user.permissions
+    )
+  ) {
+    return normalizeUserPermissions(
+      user.permissions
+    );
+  }
+
+  return null;
+};
+
+// ============================================================
+// GET USER PERMISSIONS
+// ============================================================
+//
+// PostgreSQL is authoritative.
+//
+// backend permissions present
+//      ↓
+// use them exactly
+//
+// backend permissions []
+//      ↓
+// ZERO permissions
+//
+// backend permissions missing
+//      ↓
+// compatibility fallback (granular permissions only,
+// which never grant module access)
+//
+// The user's role name never grants anything by itself.
+// ============================================================
+
+export const getUserPermissions = (
+  user
+) => {
+  if (!user) {
+    return [];
+  }
+
+  const backendPermissions =
+    extractBackendPermissions(user);
+
+  /*
+   * CRITICAL:
+   *
+   * [] is a valid backend permission set.
+   * Do NOT fall back to the role when [] is returned.
+   */
+  if (
+    Array.isArray(
+      backendPermissions
+    )
+  ) {
+    return backendPermissions;
+  }
+
+  /*
+   * Compatibility fallback only when
+   * backend supplied no permission field.
+   */
+  const role =
+    user.role ||
+    user.backendRole ||
+    user.employeeRole;
+
+  return normalizeUserPermissions(
+    getRolePermissions(role)
+  );
+};
+
+// ============================================================
+// CHECK EXACT USER PERMISSION
+// ============================================================
 
 export const userHasPermission = (
   user,
   permission
 ) => {
-
-  if (!user?.role) {
+  if (!user) {
     return false;
   }
 
-  return roleHasPermission(
-    user.role,
-    permission
-  );
+  const requested =
+    normalizePermissionValue(
+      permission
+    );
 
+  if (!requested) {
+    return false;
+  }
+
+  const permissions =
+    getUserPermissions(user);
+
+  /*
+   * Exact permission.
+   */
+  if (
+    permissions.includes(
+      requested
+    )
+  ) {
+    return true;
+  }
+
+  /*
+   * Backend module permission may satisfy
+   * ONLY the corresponding view permission.
+   */
+  for (
+    const moduleKey of
+      BACKEND_MODULE_PERMISSIONS
+  ) {
+    if (
+      !permissions.includes(
+        moduleKey
+      )
+    ) {
+      continue;
+    }
+
+    if (
+      MODULE_VIEW_PERMISSION[
+        moduleKey
+      ] === requested
+    ) {
+      return true;
+    }
+  }
+
+  /*
+   * A module permission cannot satisfy
+   * an action permission.
+   */
+  return false;
 };
 
-
-// =========================================================
+// ============================================================
 // CHECK MULTIPLE PERMISSIONS
-// =========================================================
-//
-// ALL = user must have every permission.
-//
-// ANY = user only needs one of the permissions.
-//
-// =========================================================
+// ============================================================
 
 export const userHasPermissions = (
   user,
   permissions = [],
   mode = "ALL"
 ) => {
-
-  if (!user?.role) {
+  if (!user) {
     return false;
   }
 
-  const rolePermissions =
-    getRolePermissions(user.role);
-
-
-  if (!permissions.length) {
+  /*
+   * No requested permissions means
+   * no restriction.
+   */
+  if (
+    !Array.isArray(permissions) ||
+    permissions.length === 0
+  ) {
     return true;
   }
 
+  const normalizedPermissions =
+    permissions
+      .map(
+        normalizePermissionValue
+      )
+      .filter(Boolean);
 
-  if (mode === "ANY") {
-
-    return permissions.some(
-      (permission) =>
-        rolePermissions.includes(permission)
-    );
-
+  if (
+    normalizedPermissions.length === 0
+  ) {
+    return true;
   }
 
+  if (mode === "ANY") {
+    return normalizedPermissions.some(
+      (permission) =>
+        userHasPermission(
+          user,
+          permission
+        )
+    );
+  }
 
-  return permissions.every(
+  return normalizedPermissions.every(
     (permission) =>
-      rolePermissions.includes(permission)
+      userHasPermission(
+        user,
+        permission
+      )
   );
-
 };
 
+// ============================================================
+// CHECK MODULE ACCESS
+// ============================================================
+//
+// THIS IS THE PRIMARY SIDEBAR RBAC CHECK.
+//
+// ONLY the backend module permission itself
+// grants module access.
+//
+// Example:
+//
+// permissions = ["dashboard", "cargo"]
+//
+// dashboard  -> TRUE
+// cargo      -> TRUE
+// vessels    -> FALSE
+//
+// cargo.edit without cargo -> FALSE
+// permissions = []         -> FALSE for every module
+// ============================================================
 
-// =========================================================
+export const hasModuleAccess = (
+  user,
+  moduleKey
+) => {
+  if (
+    !user ||
+    !moduleKey
+  ) {
+    return false;
+  }
+
+  const normalizedModule =
+    normalizePermissionValue(
+      moduleKey
+    );
+
+  if (!normalizedModule) {
+    return false;
+  }
+
+  /*
+   * Resolve aliases to the canonical
+   * backend module key.
+   */
+  const resolvedModule =
+    MODULE_ALIASES[
+      normalizedModule
+    ] || normalizedModule;
+
+  /*
+   * Get backend-authoritative permissions.
+   */
+  const userPermissions =
+    getUserPermissions(user);
+
+  /*
+   * ONLY a direct backend module permission
+   * grants module access.
+   */
+  return userPermissions.includes(
+    resolvedModule
+  );
+};
+
+// ============================================================
+// CHECK ROLE PERMISSION
+// ============================================================
+//
+// Compatibility helper for old UI code.
+// Not used for runtime authorization.
+// ============================================================
+
+export const roleHasPermission = (
+  role,
+  permission
+) => {
+  const normalized =
+    normalizePermissionValue(
+      permission
+    );
+
+  if (!normalized) {
+    return false;
+  }
+
+  return getRolePermissions(
+    role
+  ).some(
+    (rolePermission) =>
+      normalizePermissionValue(
+        rolePermission
+      ) === normalized
+  );
+};
+
+// ============================================================
 // GET ALL ROLES
-// =========================================================
+// ============================================================
 
 export const getRoles = () => {
-
   return Object.keys(
     ROLE_PERMISSIONS
   );
-
 };
 
-
-// =========================================================
-// GET ALL AVAILABLE PERMISSIONS
-// =========================================================
+// ============================================================
+// GET ALL PERMISSIONS
+// ============================================================
 
 export const getAllPermissions = () => {
-
   return Object.values(
     PERMISSIONS
   );
-
 };
 
-
-// =========================================================
-// GET PERMISSION GROUPS
-// =========================================================
-//
-// Useful later for the User & Role Management screen.
-//
-// Port officials can eventually see permissions grouped
-// by module instead of seeing a huge flat list.
-// =========================================================
+// ============================================================
+// PERMISSION GROUPS
+// ============================================================
 
 export const PERMISSION_GROUPS = {
-
   "Port Dashboard": [
     PERMISSIONS.DASHBOARD_VIEW,
   ],
@@ -832,7 +1182,7 @@ export const PERMISSION_GROUPS = {
     PERMISSIONS.COMMUNICATION_MANAGE,
   ],
 
-  "Notifications": [
+  Notifications: [
     PERMISSIONS.NOTIFICATIONS_VIEW,
     PERMISSIONS.NOTIFICATIONS_MANAGE,
   ],
@@ -901,16 +1251,34 @@ export const PERMISSION_GROUPS = {
     PERMISSIONS.ROLES_DELETE,
     PERMISSIONS.ROLES_ASSIGN_PERMISSIONS,
   ],
-
 };
 
+// ============================================================
+// DEFAULT EXPORT
+// ============================================================
 
-// =========================================================
-// EXPORT
-// =========================================================
-
-export default {
+const permissionsConfig = {
   PERMISSIONS,
+  BACKEND_MODULE_PERMISSIONS,
+  MODULE_PERMISSIONS,
   ROLE_PERMISSIONS,
   PERMISSION_GROUPS,
+
+  getRolePermissions,
+  getUserPermissions,
+  normalizeUserPermissions,
+  normalizePermissionValue,
+
+  userHasPermission,
+  userHasPermissions,
+  hasModuleAccess,
+
+  roleHasPermission,
+
+  getRoles,
+  getAllPermissions,
+
+  isPortAdministrator,
 };
+
+export default permissionsConfig;
