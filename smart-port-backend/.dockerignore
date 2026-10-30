@@ -1,0 +1,21 @@
+# Never put secrets into the image
+.env
+.env.*
+!.env.example
+
+# Local Python environment and caches
+venv/
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime data (kept in Docker volumes instead)
+ais_state/
+ml_models/
+.vesselapi_state.json
+
+# Backups and git
+*.bak
+.git
