@@ -1,0 +1,111 @@
+name: Frontend CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'smart-port-frontend/**'
+      - '.github/workflows/frontend-deploy.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'smart-port-frontend/**'
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REGISTRY: 050129644678.dkr.ecr.ap-south-1.amazonaws.com
+  ECR_REPOSITORY: smart-port-frontend
+  EC2_INSTANCE_ID: i-06f01674540bfb306
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: smart-port-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: smart-port-frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (acts as the test gate - fails on compile errors)
+        env:
+          GENERATE_SOURCEMAP: 'false'
+          CI: 'false'
+        run: npm run build
+
+  build-and-push:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image
+        working-directory: smart-port-frontend
+        run: |
+          docker build \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }} \
+            .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+
+  deploy:
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to EC2 via SSM
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy frontend from GitHub Actions (${{ github.sha }})" \
+            --parameters 'commands=[
+              "command -v aws >/dev/null 2>&1 || (sudo apt-get update -y && sudo apt-get install -y awscli)",
+              "aws ecr get-login-password --region ap-south-1 | sudo docker login --username AWS --password-stdin 050129644678.dkr.ecr.ap-south-1.amazonaws.com",
+              "cd /opt/smart-port",
+              "sudo docker compose pull frontend",
+              "sudo docker compose up -d frontend"
+            ]' \
+            --query "Command.CommandId" --output text)
+          echo "SSM Command ID: $COMMAND_ID"
+
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "${{ env.EC2_INSTANCE_ID }}" || true
+
+          STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "${{ env.EC2_INSTANCE_ID }}" --query "Status" --output text)
+          echo "Deploy status: $STATUS"
+          echo "--- stdout ---"
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "${{ env.EC2_INSTANCE_ID }}" --query "StandardOutputContent" --output text
+          echo "--- stderr ---"
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "${{ env.EC2_INSTANCE_ID }}" --query "StandardErrorContent" --output text
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "Deployment failed"
+            exit 1
+          fi
