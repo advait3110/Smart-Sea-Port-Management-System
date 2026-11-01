@@ -99,6 +99,14 @@ jobs:
     needs: build-and-push
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Only one deploy to the EC2 host at a time, shared with
+    # frontend-deploy.yml's deploy job - two deploys racing on the same
+    # Docker container (one removing it while another recreates it)
+    # corrupts the container state. A queued run waits rather than
+    # cancelling, so no deploy is silently dropped.
+    concurrency:
+      group: ec2-deploy
+      cancel-in-progress: false
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4

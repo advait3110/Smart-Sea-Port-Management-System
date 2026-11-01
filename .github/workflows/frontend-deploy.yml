@@ -93,6 +93,11 @@ jobs:
     needs: build-and-push
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Shares a concurrency group with backend-deploy.yml's deploy job -
+    # see the comment there for why.
+    concurrency:
+      group: ec2-deploy
+      cancel-in-progress: false
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
