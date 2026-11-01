@@ -2,7 +2,7 @@
 # BACKEND IMAGE - FastAPI + ML (Python 3.14)
 # =========================================================
 
-FROM python:3.14-slim
+FROM python:3.15-slim
 
 # Show logs immediately (needed for CloudWatch later), no .pyc files.
 ENV PYTHONDONTWRITEBYTECODE=1 \
