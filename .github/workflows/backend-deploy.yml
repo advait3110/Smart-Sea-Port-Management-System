@@ -10,6 +10,7 @@ on:
     branches: [main]
     paths:
       - 'smart-port-backend/**'
+  workflow_dispatch: {}
 
 env:
   AWS_REGION: ap-south-1
