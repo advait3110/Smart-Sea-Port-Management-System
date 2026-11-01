@@ -3,7 +3,7 @@
 # =========================================================
 
 # ---------- Step 1: build the React website ----------
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 
 WORKDIR /app
 
