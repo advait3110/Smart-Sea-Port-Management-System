@@ -1,0 +1,28 @@
+name: OWASP ZAP DAST Scan
+
+on:
+  schedule:
+    # Every Monday at 03:00 UTC - a passive scan against the live site,
+    # not tied to every push (it's scanning the deployed app, not the code).
+    - cron: '0 3 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  zap-baseline:
+    name: ZAP Baseline Scan (passive DAST)
+    runs-on: ubuntu-latest
+    steps:
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: 'https://smartport-singapore.duckdns.org'
+          # Baseline scan is passive only (spiders + inspects responses) -
+          # it does not attempt exploits, so it's safe to run against the
+          # live deployed site rather than a staging copy.
+          cmd_options: '-a'
+          allow_issue_writing: true
+          fail_action: false

@@ -12,6 +12,10 @@ on:
       - 'smart-port-backend/**'
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+  security-events: write
+
 env:
   AWS_REGION: ap-south-1
   ECR_REGISTRY: 050129644678.dkr.ecr.ap-south-1.amazonaws.com
@@ -74,6 +78,22 @@ jobs:
             .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+
+      - name: Scan image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-backend
 
   deploy:
     needs: build-and-push
