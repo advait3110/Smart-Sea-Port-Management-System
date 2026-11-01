@@ -47,7 +47,7 @@ threadpoolctl==3.7.0
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 tzdata==2026.3
-uvicorn==0.52.4
+uvicorn==0.54.0
 websocket-client==1.9.0
 websockets==17.2
 xgboost==3.4.1
