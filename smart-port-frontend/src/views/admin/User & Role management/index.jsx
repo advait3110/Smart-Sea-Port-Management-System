@@ -31,6 +31,47 @@ import {
   apiDelete,
 } from "../../../services/api";
 
+import {
+  useProfilePictures,
+  pictureOf,
+} from "../../../services/profilePictures";
+
+// =========================================================
+// EMPLOYEE PICTURE (profile picture or initials)
+// =========================================================
+
+const EmployeeAvatar = ({ userId, name, initials, isOnline }) => {
+  const pictures = useProfilePictures();
+
+  const picture = pictureOf(pictures, userId);
+
+  const [broken, setBroken] = React.useState("");
+
+  if (picture && broken !== picture) {
+    return (
+      <img
+        src={picture}
+        alt={name || "Profile picture"}
+        onError={() => setBroken(picture)}
+        data-testid="employee-picture"
+        className="h-10 w-10 shrink-0 rounded-full object-cover"
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+        isOnline
+          ? "bg-indigo-500/10 text-indigo-500"
+          : "bg-gray-100 text-gray-400 dark:bg-navy-700 dark:text-gray-500"
+      }`}
+    >
+      {initials}
+    </div>
+  );
+};
+
 // =========================================================
 // FIXED SYSTEM ROLES
 // =========================================================
@@ -2003,15 +2044,12 @@ const UserManagement = () => {
                       >
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-3">
-                            <div
-                              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                                isOnline
-                                  ? "bg-indigo-500/10 text-indigo-500"
-                                  : "bg-gray-100 text-gray-400 dark:bg-navy-700 dark:text-gray-500"
-                              }`}
-                            >
-                              {initials}
-                            </div>
+                            <EmployeeAvatar
+                              userId={user.id}
+                              name={user.name}
+                              initials={initials}
+                              isOnline={isOnline}
+                            />
 
                             <div>
                               <p className="text-sm font-bold text-navy-700 dark:text-white">

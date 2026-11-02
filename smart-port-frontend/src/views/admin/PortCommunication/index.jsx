@@ -47,6 +47,11 @@ import {
 
 import { startPollTimer } from "../../../services/pollTimer";
 
+import {
+  useProfilePictures,
+  pictureOf,
+} from "../../../services/profilePictures";
+
 // =========================================================
 // PORT COMMUNICATION
 // =========================================================
@@ -787,6 +792,7 @@ const normalizeArchived = (raw) => {
     type,
     name: raw.name || "Unknown",
     subtitle: raw.subtitle || "",
+    participantId,
     reason: raw.reason === "archived" ? "archived" : "deleted",
     messageCount: Number(raw.message_count) || 0,
     lastMine: last ? !!last.mine : false,
@@ -934,31 +940,61 @@ const downloadAttachment = async (attachment) => {
 // SMALL COMPONENTS
 // =========================================================
 
-const Avatar = ({ name, channel, size = "h-12 w-12", online, text = "text-sm" }) => (
-  <div className="relative flex-shrink-0">
-    <div
-      className={`flex items-center justify-center rounded-full font-bold ${size} ${text} ${
-        channel
-          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
-          : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-300"
-      }`}
-    >
-      {channel ? (
-        <MdGroup className="h-1/2 w-1/2" />
+// Shows the person's profile picture (DP) when they have one,
+// otherwise their initials. Group chats show the group icon.
+const Avatar = ({
+  name,
+  channel,
+  userId,
+  size = "h-12 w-12",
+  online,
+  text = "text-sm",
+}) => {
+  const pictures = useProfilePictures();
+
+  const picture = channel ? "" : pictureOf(pictures, userId);
+
+  // A picture that cannot be shown falls back to the initials.
+  const [broken, setBroken] = React.useState("");
+
+  const showPicture = picture && broken !== picture;
+
+  return (
+    <div className="relative flex-shrink-0">
+      {showPicture ? (
+        <img
+          src={picture}
+          alt={name || "Profile picture"}
+          onError={() => setBroken(picture)}
+          data-testid="avatar-picture"
+          className={`rounded-full object-cover ${size}`}
+        />
       ) : (
-        getInitials(name)
+        <div
+          className={`flex items-center justify-center rounded-full font-bold ${size} ${text} ${
+            channel
+              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+              : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-300"
+          }`}
+        >
+          {channel ? (
+            <MdGroup className="h-1/2 w-1/2" />
+          ) : (
+            getInitials(name)
+          )}
+        </div>
+      )}
+
+      {online !== undefined && (
+        <span
+          className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white dark:border-navy-800 ${
+            online ? "bg-green-500" : "bg-gray-300 dark:bg-gray-500"
+          }`}
+        />
       )}
     </div>
-
-    {online !== undefined && (
-      <span
-        className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white dark:border-navy-800 ${
-          online ? "bg-green-500" : "bg-gray-300 dark:bg-gray-500"
-        }`}
-      />
-    )}
-  </div>
-);
+  );
+};
 
 const Ticks = ({ message, read }) => {
   if (message.status === "sending") {
@@ -1609,7 +1645,11 @@ const ArchivePanel = ({ items, restoringId, error, onBack, onRestore }) => (
           data-name={item.name}
           className="flex items-center gap-3 border-b border-gray-50 px-4 py-3.5 dark:border-white/5"
         >
-          <Avatar name={item.name} channel={item.type === "channel"} />
+          <Avatar
+            name={item.name}
+            channel={item.type === "channel"}
+            userId={item.participantId}
+          />
 
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
@@ -4013,6 +4053,7 @@ const PortCommunication = () => {
                   <Avatar
                     name={entry.name}
                     channel={entry.type === "channel"}
+                    userId={entry.participantId}
                     online={
                       entry.type === "direct" ? entry.online : undefined
                     }
@@ -4113,6 +4154,7 @@ const PortCommunication = () => {
                   <Avatar
                     name={selectedEntry.name}
                     channel={selectedEntry.type === "channel"}
+                    userId={selectedEntry.participantId}
                     size="h-11 w-11"
                     text="text-xs"
                     online={
