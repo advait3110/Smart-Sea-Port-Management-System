@@ -1,0 +1,54 @@
+
+name: smart-port
+
+services:
+  backend:
+    build:
+      context: ./smart-port-backend
+    image: smart-port-backend:latest
+    restart: unless-stopped
+    env_file:
+      - ./smart-port-backend/.env
+    volumes:
+      - ml_models:/app/ml_models
+      - ais_state:/app/ais_state
+    expose:
+      - "8000"
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build:
+      context: ./smart-port-frontend
+      args:
+        REACT_APP_API_BASE_URL: /api
+    image: smart-port-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ml_models:
+  ais_state:
