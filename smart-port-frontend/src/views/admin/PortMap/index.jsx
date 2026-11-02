@@ -1,5 +1,7 @@
 import React from "react";
 
+import { createPortal } from "react-dom";
+
 import {
   MapContainer,
   TileLayer,
@@ -15,7 +17,11 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-import { apiGet } from "services/api";
+import { apiGet, apiPost } from "services/api";
+
+import authService from "layouts/auth/authService";
+
+import { hasModuleAccess } from "layouts/auth/permissions";
 
 /*
 =========================================================
@@ -63,9 +69,20 @@ Operational circle: drag the round handle on its edge (or use the
 slider in the Port panel) to resize it. The ships inside it are
 counted. Its size is saved in this browser only.
 
-Gate / truck and alert markers (Operations panel) are placed by hand:
-drag to move, double-click to add another one next to it, right-click
-an added one to remove it. Positions are saved in this browser only
+Incidents (red "!" markers): real incidents from the database
+(GET /incidents) that have a spot on the map and are still open
+(not Resolved / Closed). Every account that can open this map sees
+the same ones. An account with the Incident Management permission
+can right-click the map to report an incident at that spot
+(POST /incidents with latitude / longitude). The backend then tells
+the accounts that must know (by incident type, see
+incident_service.py) to look at the map. Incidents reported in Port
+Alerts or Incident Management have no map spot, so they are not drawn
+here.
+
+Gate / truck markers (Operations panel) are placed by hand: drag to
+move, double-click to add another one next to it, right-click an added
+one to remove it. Positions are saved in this browser only
 (localStorage); they are not stored in the backend database and are
 not survey data.
 
@@ -350,21 +367,39 @@ const gates = [
 ];
 
 /* =========================================================
-   ALERT MARKERS (starting positions, not survey data)
+   INCIDENTS ON THE MAP
+   The same lists as the backend (app/services/incident_service.py).
    ========================================================= */
 
-const alerts = [
-  {
-    id: "A01",
-    title: "Operational Alert",
-    position: [1.2661, 103.7991],
-  },
-  {
-    id: "A02",
-    title: "Maintenance Alert",
-    position: [1.2627, 103.8015],
-  },
+const INCIDENT_TYPES = [
+  "Vessel Incident",
+  "Equipment Failure",
+  "Gate/Security Incident",
+  "Environmental Incident",
+  "Fire/Safety",
+  "Injury / Medical",
+  "Cargo Damage",
+  "Other",
 ];
+
+const INCIDENT_SEVERITIES = ["Critical", "High", "Medium", "Low"];
+
+const FINISHED_INCIDENT_STATUSES = ["Resolved", "Closed"];
+
+const MAX_INCIDENT_LOCATION = 120;
+const MAX_INCIDENT_VESSEL = 120;
+const MAX_INCIDENT_TEXT = 4000;
+
+/* The marker of the spot that is being reported (before saving). */
+const pendingIncidentIcon = createIcon("#f97316", "?", "text", 36);
+
+const emptyIncidentForm = () => ({
+  type: INCIDENT_TYPES[0],
+  severity: "Medium",
+  location: "",
+  vessel: "",
+  description: "",
+});
 
 /* =========================================================
    NUMBER HELPERS
@@ -705,6 +740,94 @@ const normalizeBerth = (berth) => {
 };
 
 /* =========================================================
+   INCIDENT NORMALIZER
+
+   Only open incidents with a valid map spot are drawn.
+   ========================================================= */
+
+const normalizeMapIncident = (incident) => {
+  if (!incident) {
+    return null;
+  }
+
+  const latitude = toNumber(incident.latitude);
+  const longitude = toNumber(incident.longitude);
+
+  if (!isValidLatitude(latitude) || !isValidLongitude(longitude)) {
+    return null;
+  }
+
+  const status = incident.status || "Reported";
+
+  if (FINISHED_INCIDENT_STATUSES.includes(status)) {
+    return null;
+  }
+
+  return {
+    id: incident.id,
+    number: incident.number || `INC-${incident.id}`,
+    type: incident.type || "Incident",
+    severity: incident.severity || "Medium",
+    status,
+    location: incident.location || "",
+    vessel: incident.vessel || "",
+    description: incident.description || "",
+    reportedBy: incident.reported_by ? incident.reported_by.name : "",
+    occurredAt: incident.occurred_at || incident.created_at || null,
+    position: [latitude, longitude],
+  };
+};
+
+const shortText = (value, length) => {
+  const clean = String(value || "").replace(/\s+/g, " ").trim();
+
+  return clean.length > length ? `${clean.slice(0, length - 1)}…` : clean;
+};
+
+const readErrorMessage = (error, fallback) => {
+  if (error && typeof error.message === "string" && error.message.trim()) {
+    return error.message;
+  }
+
+  if (error && typeof error.detail === "string" && error.detail.trim()) {
+    return error.detail;
+  }
+
+  return fallback;
+};
+
+/* =========================================================
+   RIGHT-CLICK ON THE MAP (report an incident here)
+   ========================================================= */
+
+const MapRightClick = ({ onPick }) => {
+  useMapEvents({
+    contextmenu: (event) => {
+      onPick([event.latlng.lat, event.latlng.lng]);
+    },
+  });
+
+  return null;
+};
+
+/* The report window is drawn straight in <body>, above the map, with
+   the dark colours of the page when dark mode is on. */
+const BodyPortal = ({ children }) => {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const dark =
+    document.documentElement.classList.contains("dark") ||
+    document.body.classList.contains("dark");
+
+  return createPortal(
+    <div className={dark ? "dark" : undefined}>{children}</div>,
+    document.body
+  );
+};
+
+/* =========================================================
    MAP RECENTER COMPONENT
 
    Only moves when the user asks (marker click, list click,
@@ -1032,7 +1155,6 @@ const LegendItem = ({ swatch, label }) => (
     {label}
   </span>
 );
-
 /* =========================================================
    MAIN PORT MAP
    ========================================================= */
@@ -1056,8 +1178,8 @@ const PortMap = () => {
   /* =======================================================
      MAP LAYERS
 
-     Ships, berths and the operational circle are on by default.
-     The gate and alert markers are off.
+     Ships, berths, incidents and the operational circle are on by
+     default. The gate markers are off.
      ======================================================= */
 
   const [showBerthShips, setShowBerthShips] = React.useState(
@@ -1080,8 +1202,9 @@ const PortMap = () => {
     booleanOr(saved.layers?.gates, false)
   );
 
-  const [showAlerts, setShowAlerts] = React.useState(
-    booleanOr(saved.layers?.alerts, false)
+  /* Real incidents with a map spot: on by default. */
+  const [showIncidents, setShowIncidents] = React.useState(
+    booleanOr(saved.layers?.incidents, true)
   );
 
   /* The operational circle (saved under "zone"). */
@@ -1090,18 +1213,14 @@ const PortMap = () => {
   );
 
   /* =======================================================
-     DRAGGABLE GATE + ALERT MARKERS, RESIZABLE CIRCLE
+     DRAGGABLE GATE MARKERS, RESIZABLE CIRCLE
 
-     Gate and alert markers and the circle size are kept in this
-     browser only (localStorage).
+     Gate markers and the circle size are kept in this browser only
+     (localStorage).
      ======================================================= */
 
   const [gatePositions, setGatePositions] = React.useState(() =>
     buildItems(gates, saved.gates, saved.gatesExtra, "name")
-  );
-
-  const [alertPositions, setAlertPositions] = React.useState(() =>
-    buildItems(alerts, saved.alerts, saved.alertsExtra, "title")
   );
 
   const [operationalRadius, setOperationalRadius] = React.useState(() => {
@@ -1202,6 +1321,30 @@ const PortMap = () => {
   const [search, setSearch] = React.useState("");
 
   /* =======================================================
+     INCIDENTS (from the database) + REPORTING ON THE MAP
+     ======================================================= */
+
+  const [mapIncidents, setMapIncidents] = React.useState([]);
+
+  /* Where the person right-clicked (null = report window closed). */
+  const [reportSpot, setReportSpot] = React.useState(null);
+  const [reportForm, setReportForm] = React.useState(emptyIncidentForm);
+  const [reportError, setReportError] = React.useState("");
+  const [reportSaving, setReportSaving] = React.useState(false);
+  const [mapMessage, setMapMessage] = React.useState("");
+  const mapMessageTimerRef = React.useRef(null);
+
+  /* Reporting needs the Incident Management permission (the backend
+     checks it too). */
+  const canReport = (() => {
+    try {
+      return hasModuleAccess(authService.getCurrentUser(), "incidents");
+    } catch (error) {
+      return false;
+    }
+  })();
+
+  /* =======================================================
      FLY-TO TARGET (null until the user asks)
      ======================================================= */
 
@@ -1246,8 +1389,6 @@ const PortMap = () => {
     updateStoredLayout({
       gates: positionsToMap(gatePositions.filter((item) => !item.extra)),
       gatesExtra: gatePositions.filter((item) => item.extra),
-      alerts: positionsToMap(alertPositions.filter((item) => !item.extra)),
-      alertsExtra: alertPositions.filter((item) => item.extra),
       radius: operationalRadius,
       layers: {
         berthShips: showBerthShips,
@@ -1255,21 +1396,20 @@ const PortMap = () => {
         oldShips: showOldShips,
         berths: showBerths,
         gates: showGates,
-        alerts: showAlerts,
+        incidents: showIncidents,
         zone: showArea,
       },
       mapType,
     });
   }, [
     gatePositions,
-    alertPositions,
     operationalRadius,
     showBerthShips,
     showAnchorShips,
     showOldShips,
     showBerths,
     showGates,
-    showAlerts,
+    showIncidents,
     showArea,
     mapType,
   ]);
@@ -1291,9 +1431,10 @@ const PortMap = () => {
 
     const requestId = requestCounterRef.current;
 
-    const [vesselResult, berthResult] = await Promise.all([
+    const [vesselResult, berthResult, incidentResult] = await Promise.all([
       settle(() => apiGet("/vessels")),
       settle(() => apiGet("/berths")),
+      settle(() => apiGet("/incidents")),
     ]);
 
     /* Ignore the answer if the page was closed or a newer
@@ -1359,6 +1500,25 @@ const PortMap = () => {
       );
     }
 
+    /* ---------- incidents ----------
+
+       A refusal (no permission) or a failure keeps the last list;
+       nothing is made up. */
+
+    if (incidentResult.ok) {
+      const value = incidentResult.value;
+
+      const records = Array.isArray(value)
+        ? value
+        : Array.isArray(value?.incidents)
+        ? value.incidents
+        : null;
+
+      if (records) {
+        setMapIncidents(records.map(normalizeMapIncident).filter(Boolean));
+      }
+    }
+
     setAisLoading(false);
   }, []);
 
@@ -1373,9 +1533,14 @@ const PortMap = () => {
 
     const interval = setInterval(fetchMapData, DATA_REFRESH_INTERVAL);
 
+    /* A new or changed incident (live alerts, if installed): reload. */
+    window.addEventListener("singapore-incidents-changed", fetchMapData);
+
     return () => {
       mountedRef.current = false;
       clearInterval(interval);
+      window.removeEventListener("singapore-incidents-changed", fetchMapData);
+      window.clearTimeout(mapMessageTimerRef.current);
     };
   }, [fetchMapData]);
 
@@ -1571,18 +1736,128 @@ const PortMap = () => {
   };
 
   /* =======================================================
-     RESET ICONS (gate and alert markers back to their defaults,
-     added ones removed)
+     RESET ICONS (gate markers back to their defaults, added ones
+     removed)
      ======================================================= */
 
   const handleResetIcons = () => {
     setGatePositions(cloneItems(gates));
-    setAlertPositions(cloneItems(alerts));
   };
 
   const handleResetCircle = () => {
     setOperationalRadius(DEFAULT_RADIUS);
     setHandleAngle(0);
+  };
+
+  /* =======================================================
+     REPORT AN INCIDENT AT A SPOT (right-click on the map)
+     ======================================================= */
+
+  const showMapMessage = (text) => {
+    setMapMessage(text);
+    window.clearTimeout(mapMessageTimerRef.current);
+    mapMessageTimerRef.current = window.setTimeout(
+      () => setMapMessage(""),
+      7000
+    );
+  };
+
+  const openReport = React.useCallback((spot) => {
+    setReportSpot(spot);
+    setReportForm(emptyIncidentForm());
+    setReportError("");
+  }, []);
+
+  const closeReport = React.useCallback(() => {
+    if (!reportSaving) {
+      setReportSpot(null);
+      setReportError("");
+    }
+  }, [reportSaving]);
+
+  React.useEffect(() => {
+    if (!reportSpot) {
+      return undefined;
+    }
+
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") {
+        closeReport();
+      }
+    };
+
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [reportSpot, closeReport]);
+
+  const updateReport = (field, value) =>
+    setReportForm((current) => ({ ...current, [field]: value }));
+
+  const submitReport = async (event) => {
+    event.preventDefault();
+
+    if (reportSaving || !reportSpot) {
+      return;
+    }
+
+    const location = reportForm.location.trim();
+    const description = reportForm.description.trim();
+
+    if (!location) {
+      setReportError("Enter where it happened (for example Berth 2).");
+      return;
+    }
+
+    if (!description) {
+      setReportError("Describe what happened.");
+      return;
+    }
+
+    setReportSaving(true);
+    setReportError("");
+
+    try {
+      const result = await apiPost("/incidents", {
+        type: reportForm.type,
+        severity: reportForm.severity,
+        location,
+        vessel: reportForm.vessel.trim() || null,
+        description,
+        latitude: reportSpot[0],
+        longitude: reportSpot[1],
+      });
+
+      if (!mountedRef.current) {
+        return;
+      }
+
+      const saved = normalizeMapIncident(result?.incident);
+
+      if (saved) {
+        setMapIncidents((current) => [
+          saved,
+          ...current.filter((item) => item.id !== saved.id),
+        ]);
+      }
+
+      setShowIncidents(true);
+      setReportSpot(null);
+
+      showMapMessage(
+        `${saved ? saved.number : "The incident"} is saved and shown on the map. The people who must know have been notified.`
+      );
+    } catch (error) {
+      if (mountedRef.current) {
+        setReportError(
+          readErrorMessage(error, "The incident could not be saved.")
+        );
+      }
+    } finally {
+      if (mountedRef.current) {
+        setReportSaving(false);
+      }
+    }
   };
 
   /* =======================================================
@@ -1639,15 +1914,13 @@ const PortMap = () => {
       onChange: setShowGates,
     },
     {
-      key: "alerts",
+      key: "incidents",
       swatch: "rounded-full bg-red-600",
-      label: "Alerts",
-      checked: showAlerts,
-      onChange: setShowAlerts,
+      label: `Incidents (${mapIncidents.length})`,
+      checked: showIncidents,
+      onChange: setShowIncidents,
     },
   ];
-
-  const anyOperationLayer = showGates || showAlerts;
 
   /* =======================================================
      NOTICES (shown above the map, never on top of it)
@@ -1943,6 +2216,15 @@ const PortMap = () => {
                 onChange={layer.onChange}
               />
             ))}
+
+            <p
+              className="mt-1 text-[10px] leading-4 text-gray-500 dark:text-gray-400"
+              data-testid="report-hint"
+            >
+              {canReport
+                ? "Right-click the map to report an incident at that spot."
+                : "Open incidents that have a map spot are shown."}
+            </p>
           </div>
 
           {/* ===================================================
@@ -2047,11 +2329,11 @@ const PortMap = () => {
               =================================================== */}
 
           <div className="absolute bottom-5 right-[56px] z-[1000] flex gap-2">
-            {anyOperationLayer && (
+            {showGates && (
               <button
                 type="button"
                 onClick={handleResetIcons}
-                title="Restore the default gate and alert markers"
+                title="Restore the default gate markers"
                 className="rounded-xl bg-white/95 px-3 py-2 text-xs font-bold text-navy-700 shadow-xl backdrop-blur transition hover:bg-white dark:bg-navy-800/95 dark:text-white"
               >
                 Reset Icons
@@ -2140,6 +2422,8 @@ const PortMap = () => {
             <MapResizeHandler />
             <MapViewTracker onZoomChange={setZoom} />
             <RecenterMap target={flyTarget} />
+
+            {canReport && <MapRightClick onPick={openReport} />}
 
             {/* =================================================
                 OPERATIONAL CIRCLE
@@ -2341,58 +2625,47 @@ const PortMap = () => {
               ))}
 
             {/* =================================================
-                ALERTS (draggable, saved; double-click adds one)
+                INCIDENTS (from the database, not draggable)
                 ================================================= */}
 
-            {showAlerts &&
-              alertPositions.map((alert) => (
+            {showIncidents &&
+              mapIncidents.map((incident) => (
                 <Marker
-                  key={alert.id}
-                  position={alert.position}
+                  key={`incident-${incident.id}`}
+                  position={incident.position}
                   icon={alertIcon}
-                  draggable={true}
-                  eventHandlers={{
-                    ...(alert.extra
-                      ? {
-                          contextmenu: () =>
-                            setAlertPositions((current) =>
-                              current.filter((item) => item.id !== alert.id)
-                            ),
-                        }
-                      : {}),
-                    dblclick: (event) => {
-                      const point = event.target.getLatLng();
-
-                      setAlertPositions((current) => [
-                        ...current,
-                        {
-                          id: newItemId(),
-                          title: `Alert ${current.length + 1}`,
-                          extra: true,
-                          position: nearbyPosition(point),
-                        },
-                      ]);
-                    },
-                    dragend: (event) => {
-                      const point = event.target.getLatLng();
-
-                      setAlertPositions((current) =>
-                        current.map((item) =>
-                          item.id === alert.id
-                            ? { ...item, position: [point.lat, point.lng] }
-                            : item
-                        )
-                      );
-                    },
-                  }}
+                  zIndexOffset={1800}
                 >
                   <Tooltip direction="top" offset={[0, -18]}>
-                    <div className="font-bold">{alert.title}</div>
-                    <div>Drag to move · double-click to add another</div>
-                    {alert.extra && <div>Right-click to remove</div>}
+                    <div className="max-w-[240px] whitespace-normal">
+                      <div className="font-bold">
+                        {incident.number} · {incident.severity}
+                      </div>
+                      <div>{incident.type}</div>
+                      <div>At: {incident.location}</div>
+                      {incident.vessel && <div>Vessel: {incident.vessel}</div>}
+                      <div>Status: {incident.status}</div>
+                      {incident.description && (
+                        <div>{shortText(incident.description, 120)}</div>
+                      )}
+                      <div>
+                        {incident.reportedBy
+                          ? `Reported by ${incident.reportedBy}, `
+                          : ""}
+                        {formatPortTime(incident.occurredAt)}
+                      </div>
+                    </div>
                   </Tooltip>
                 </Marker>
               ))}
+
+            {reportSpot && (
+              <Marker
+                position={reportSpot}
+                icon={pendingIncidentIcon}
+                zIndexOffset={1900}
+              />
+            )}
           </MapContainer>
 
           {/* ===================================================
@@ -2547,9 +2820,172 @@ const PortMap = () => {
 
       <p className="mt-3 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
         Ship positions are the last AIS positions saved in the database, not a
-        live feed. Berths come from Berth Management. Gate and alert
-        markers are placed by hand and saved in this browser.
+        live feed. Berths come from Berth Management. Incidents come from
+        the incident register (only open ones with a map spot). Gate markers
+        are placed by hand and saved in this browser.
       </p>
+
+      {/* ===================================================
+          MESSAGE AFTER REPORTING
+          =================================================== */}
+
+      {mapMessage && (
+        <BodyPortal>
+          <div
+            role="status"
+            data-testid="map-message"
+            className="fixed bottom-6 left-1/2 z-[3200] w-[min(92vw,520px)] -translate-x-1/2 rounded-xl bg-navy-700 px-4 py-3 text-sm font-semibold text-white shadow-xl"
+          >
+            {mapMessage}
+          </div>
+        </BodyPortal>
+      )}
+
+      {/* ===================================================
+          REPORT AN INCIDENT WINDOW
+          =================================================== */}
+
+      {reportSpot && (
+        <BodyPortal>
+          <div
+            className="fixed inset-0 z-[3100] flex items-center justify-center bg-black/50 p-4"
+            data-testid="report-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                closeReport();
+              }
+            }}
+          >
+            <form
+              role="dialog"
+              aria-modal="true"
+              aria-label="Report an incident here"
+              data-testid="report-dialog"
+              onSubmit={submitReport}
+              className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:bg-navy-800"
+            >
+              <h3 className="text-base font-bold text-navy-700 dark:text-white">
+                Report an incident here
+              </h3>
+
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Map spot {reportSpot[0].toFixed(5)},{" "}
+                {reportSpot[1].toFixed(5)}. Everyone who can open the map
+                will see it, and the people who must know are notified.
+              </p>
+
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <label className="block text-xs font-semibold text-navy-700 dark:text-white">
+                  Type
+                  <select
+                    value={reportForm.type}
+                    onChange={(event) => updateReport("type", event.target.value)}
+                    data-testid="report-type"
+                    className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-2 text-sm font-normal text-navy-700 outline-none focus:border-brand-500 dark:border-white/10 dark:bg-navy-900 dark:text-white"
+                  >
+                    {INCIDENT_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {type}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block text-xs font-semibold text-navy-700 dark:text-white">
+                  Severity
+                  <select
+                    value={reportForm.severity}
+                    onChange={(event) =>
+                      updateReport("severity", event.target.value)
+                    }
+                    data-testid="report-severity"
+                    className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-2 text-sm font-normal text-navy-700 outline-none focus:border-brand-500 dark:border-white/10 dark:bg-navy-900 dark:text-white"
+                  >
+                    {INCIDENT_SEVERITIES.map((severity) => (
+                      <option key={severity} value={severity}>
+                        {severity}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="mt-3 block text-xs font-semibold text-navy-700 dark:text-white">
+                Where (place name)
+                <input
+                  type="text"
+                  value={reportForm.location}
+                  maxLength={MAX_INCIDENT_LOCATION}
+                  onChange={(event) =>
+                    updateReport("location", event.target.value)
+                  }
+                  placeholder="For example Pasir Panjang Terminal, Berth 4"
+                  data-testid="report-location"
+                  autoFocus
+                  className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-navy-700 outline-none focus:border-brand-500 dark:border-white/10 dark:bg-navy-900 dark:text-white"
+                />
+              </label>
+
+              <label className="mt-3 block text-xs font-semibold text-navy-700 dark:text-white">
+                Vessel (optional)
+                <input
+                  type="text"
+                  value={reportForm.vessel}
+                  maxLength={MAX_INCIDENT_VESSEL}
+                  onChange={(event) => updateReport("vessel", event.target.value)}
+                  data-testid="report-vessel"
+                  className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-navy-700 outline-none focus:border-brand-500 dark:border-white/10 dark:bg-navy-900 dark:text-white"
+                />
+              </label>
+
+              <label className="mt-3 block text-xs font-semibold text-navy-700 dark:text-white">
+                What happened
+                <textarea
+                  value={reportForm.description}
+                  maxLength={MAX_INCIDENT_TEXT}
+                  rows={4}
+                  onChange={(event) =>
+                    updateReport("description", event.target.value)
+                  }
+                  data-testid="report-description"
+                  className="mt-1 w-full resize-y rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-normal text-navy-700 outline-none focus:border-brand-500 dark:border-white/10 dark:bg-navy-900 dark:text-white"
+                />
+              </label>
+
+              {reportError && (
+                <div
+                  role="alert"
+                  data-testid="report-error"
+                  className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 dark:bg-red-500/10 dark:text-red-300"
+                >
+                  {reportError}
+                </div>
+              )}
+
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeReport}
+                  disabled={reportSaving}
+                  data-testid="report-cancel"
+                  className="rounded-xl bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600 transition hover:bg-gray-200 disabled:opacity-50 dark:bg-navy-700 dark:text-gray-200"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={reportSaving}
+                  data-testid="report-submit"
+                  className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-700 disabled:opacity-50"
+                >
+                  {reportSaving ? "Saving…" : "Report incident"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </BodyPortal>
+      )}
     </div>
   );
 };

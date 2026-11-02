@@ -7,6 +7,8 @@ Incident Management endpoints.
     GET    /incidents/designations             designations an incident can
                                                be assigned to (not your own)
     POST   /incidents                          report a new incident
+                                               (latitude / longitude: a
+                                               spot on the Live Port Map)
     GET    /incidents/{id}                     one incident + its timeline
     POST   /incidents/{id}/status              {status, note?}
     POST   /incidents/{id}/assign              {designation | user_id | none, note?}
@@ -57,6 +59,9 @@ class IncidentIn(BaseModel):
     description: str = Field(default="", max_length=20000)
     vessel: str | None = Field(default=None, max_length=1000)
     occurred_at: str | None = Field(default=None, max_length=60)
+    # The spot on the Live Port Map (both, or neither).
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class StatusIn(BaseModel):
@@ -128,6 +133,8 @@ def report_incident(
         data.description,
         data.vessel,
         data.occurred_at,
+        latitude=data.latitude,
+        longitude=data.longitude,
     )
 
 

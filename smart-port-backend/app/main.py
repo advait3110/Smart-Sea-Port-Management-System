@@ -33,6 +33,7 @@ from app.api.routes.incidents import router as incidents_router
 from app.api.routes.assets import router as assets_router
 from app.api.routes.documents import router as documents_router
 from app.api.routes.audit import router as audit_router
+from app.api.routes.profile_pictures import router as profile_pictures_router
 from app.api.routes.predictions import router as predictions_router
 from app.models.role import Role
 
@@ -780,6 +781,7 @@ app.include_router(
 # Executive may read it. The routes check the role themselves
 # (audit_service.require_oversight), whatever features a role has.
 app.include_router(audit_router)
+app.include_router(profile_pictures_router)
 
 # =========================================================
 # HEALTH CHECK

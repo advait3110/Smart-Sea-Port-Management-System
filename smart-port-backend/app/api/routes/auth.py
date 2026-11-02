@@ -264,3 +264,44 @@ def get_my_profile(
     return build_user_response(
         current_user
     )
+
+
+# ============================================================
+# RENEW THE LOGIN
+# ============================================================
+
+
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+)
+def refresh_login(
+    current_user: User = Depends(
+        get_current_user
+    ),
+):
+    """
+    Give the logged-in employee a fresh login token.
+
+    The app calls this quietly while the person is working,
+    shortly before the current token runs out. That way
+    nobody is signed out in the middle of their work.
+
+    It needs a token that is still valid. get_current_user
+    has already checked that the account exists, is active
+    and has a role, so a disabled account can never renew.
+
+    It is not written to the Audit Log: it happens many
+    times a day and is not an action by the person.
+    """
+
+    access_token = create_access_token(
+        user_id=current_user.id,
+        username=current_user.username,
+        role=current_user.role.name,
+    )
+
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+    )

@@ -31,7 +31,12 @@ import {
   MdMoreVert,
   MdBlock,
   MdDeleteSweep,
+  MdPushPin,
+  MdOutlinePushPin,
+  MdContentCopy,
 } from "react-icons/md";
+
+import { getCurrentUser } from "layouts/auth/authService";
 
 import { apiGet, apiPost, apiDelete } from "../../../services/api";
 
@@ -62,6 +67,14 @@ import { startPollTimer } from "../../../services/pollTimer";
 //   me" or, for your own messages, "Delete for everyone" (the message
 //   becomes "This message was deleted" for everybody)
 // - "Delete all chats" (the three dots above the chat list)
+// - Right-click menus like WhatsApp Web (the browser's own menu is not
+//   shown there):
+//     * right-click a chat in the list: Mark as read, Pin chat /
+//       Unpin chat, Delete chat
+//     * right-click a message: Copy, Download (documents and images),
+//       Delete
+//   Pinned chats stay at the top of the list (at most 3, like
+//   WhatsApp). Pins are kept in this browser for this account.
 // - Chats whose newest message is older than 6 months are moved to
 //   "Deleted & archived chats" when the person logs in (the server
 //   does this when the chat list loads); Restore brings them back
@@ -117,9 +130,18 @@ const MESSAGE_REFRESH_MS = 2500;
 // The "Deleted & archived chats" list is checked now and then.
 const ARCHIVE_REFRESH_MS = 30000;
 
-// Width and height (pixels) of the little menu next to a message.
-const MENU_WIDTH = 176;
-const MENU_HEIGHT = 52;
+// Size (pixels) of the right-click menus and of the menu next to a
+// message: width, height of one line and the space above + below.
+const MENU_WIDTH = 200;
+const MENU_ITEM_HEIGHT = 44;
+const MENU_PADDING = 8;
+
+// Pinned chats (WhatsApp allows 3). Kept per account in this browser.
+const MAX_PINNED = 3;
+const PINNED_KEY_PREFIX = "singaporePortPinnedChats:";
+
+// How long the small "Message copied" note stays on screen.
+const NOTICE_MS = 2500;
 
 const RECENT_EMOJI_KEY = "singaporePortRecentEmojis";
 
@@ -548,6 +570,109 @@ const saveRecentEmojis = (list) => {
     );
   } catch {
     // Storage may be blocked. The picker still works.
+  }
+};
+
+// =========================================================
+// PINNED CHATS AND RIGHT-CLICK MENUS
+// =========================================================
+
+// Pins belong to the signed-in account (two people sharing a computer
+// do not see each other's pins).
+const getPinnedStorageKey = () => {
+  try {
+    const user = getCurrentUser();
+
+    return user && user.id !== undefined && user.id !== null
+      ? `${PINNED_KEY_PREFIX}${user.id}`
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const readPinned = () => {
+  const key = getPinnedStorageKey();
+
+  if (!key) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || "[]");
+
+    return Array.isArray(parsed)
+      ? parsed.filter((item) => typeof item === "string").slice(0, MAX_PINNED)
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const savePinned = (list) => {
+  const key = getPinnedStorageKey();
+
+  if (!key) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(key, JSON.stringify(list));
+  } catch {
+    // Storage may be blocked. The pins still work until the page
+    // is reloaded.
+  }
+};
+
+// Where to draw a menu that opens at the point (x, y): it stays fully
+// on the screen. When there is no room below, it opens upwards; when
+// there is no room on the right, it opens to the left.
+const placeMenu = (x, y, itemCount) => {
+  const height = itemCount * MENU_ITEM_HEIGHT + MENU_PADDING;
+
+  const left =
+    x + MENU_WIDTH + 8 > window.innerWidth
+      ? Math.max(8, x - MENU_WIDTH)
+      : x;
+
+  const top =
+    y + height + 8 > window.innerHeight
+      ? Math.max(8, y - height)
+      : y;
+
+  return { left, top };
+};
+
+// Copies text to the clipboard. Returns true when it worked.
+const copyText = async (value) => {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+
+      return true;
+    }
+  } catch {
+    // Fall back to the older way below.
+  }
+
+  try {
+    const area = document.createElement("textarea");
+
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+
+    document.body.appendChild(area);
+    area.select();
+
+    const done = document.execCommand("copy");
+
+    document.body.removeChild(area);
+
+    return done;
+  } catch {
+    return false;
   }
 };
 
@@ -1026,6 +1151,7 @@ const MessageBubble = ({
   onRetry,
   onDiscard,
   onOpenMenu,
+  onOpenMenuAt,
 }) => {
   const mine = message.mine;
 
@@ -1070,6 +1196,15 @@ const MessageBubble = ({
       {mine && menuButton}
 
       <div
+        data-testid="message-bubble"
+        onContextMenu={(event) => {
+          // Right-click opens the same menu as the arrow (like
+          // WhatsApp Web), instead of the browser's own menu.
+          if (canOpenMenu && onOpenMenuAt) {
+            event.preventDefault();
+            onOpenMenuAt(message, event.clientX, event.clientY);
+          }
+        }}
         className={`min-w-0 max-w-[82%] rounded-2xl px-3 py-2 shadow-sm md:max-w-[70%] ${
           deleted
             ? mine
@@ -1376,13 +1511,17 @@ const ConfirmDialog = ({ title, body, actions, busy, error, onClose }) => {
   );
 };
 
-// A small menu next to a message (Delete). It is placed on the screen
-// itself ("fixed"), so the message list can never cut it off.
-const MessageMenu = ({ menu, menuRef, onDelete }) => (
+// A small menu (the arrow next to a message, or a right-click on a
+// message or on a chat). It is placed on the screen itself ("fixed"),
+// so the message list can never cut it off.
+//
+// items: [{ key, label, Icon, onClick, danger, testId }]
+const ContextMenu = ({ menu, menuRef, items, testId }) => (
   <div
     ref={menuRef}
     role="menu"
-    data-testid="message-menu"
+    data-testid={testId}
+    onContextMenu={(event) => event.preventDefault()}
     style={{
       position: "fixed",
       left: `${menu.left}px`,
@@ -1391,16 +1530,28 @@ const MessageMenu = ({ menu, menuRef, onDelete }) => (
     }}
     className="z-[2500] overflow-hidden rounded-xl border border-gray-100 bg-white py-1 shadow-xl dark:border-white/10 dark:bg-navy-700"
   >
-    <button
-      type="button"
-      role="menuitem"
-      data-testid="message-menu-delete"
-      onClick={onDelete}
-      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-navy-700 hover:bg-gray-50 dark:text-white dark:hover:bg-navy-600"
-    >
-      <MdDeleteOutline className="h-5 w-5 text-gray-400" />
-      Delete
-    </button>
+    {items.map((item) => (
+      <button
+        key={item.key}
+        type="button"
+        role="menuitem"
+        data-testid={item.testId}
+        onClick={item.onClick}
+        style={{ height: `${MENU_ITEM_HEIGHT}px` }}
+        className={`flex w-full items-center gap-3 px-4 text-left text-sm transition ${
+          item.danger
+            ? "text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+            : "text-navy-700 hover:bg-gray-50 dark:text-white dark:hover:bg-navy-600"
+        }`}
+      >
+        <item.Icon
+          className={`h-5 w-5 flex-shrink-0 ${
+            item.danger ? "" : "text-gray-400"
+          }`}
+        />
+        {item.label}
+      </button>
+    ))}
   </div>
 );
 
@@ -1581,6 +1732,12 @@ const PortCommunication = () => {
   const [msgMenu, setMsgMenu] = React.useState(null);
   const [listMenuOpen, setListMenuOpen] = React.useState(false);
 
+  // The right-click menu of a chat in the list, the pinned chats and
+  // the small note at the bottom ("Message copied").
+  const [chatMenu, setChatMenu] = React.useState(null);
+  const [pinnedKeys, setPinnedKeys] = React.useState(readPinned);
+  const [notice, setNotice] = React.useState("");
+
   // -------------------------------------------------------
   // REFS (latest values for timers and event handlers)
   // -------------------------------------------------------
@@ -1607,6 +1764,8 @@ const PortCommunication = () => {
   const emojiPickerRef = React.useRef(null);
   const msgMenuRef = React.useRef(null);
   const listMenuRef = React.useRef(null);
+  const chatMenuRef = React.useRef(null);
+  const noticeTimerRef = React.useRef(null);
   const rootRef = React.useRef(null);
 
   const nearBottomRef = React.useRef(true);
@@ -2097,6 +2256,42 @@ const PortCommunication = () => {
     setDialog({ kind: "all" });
   };
 
+    // A short note at the bottom of the screen ("Message copied").
+  const showNotice = React.useCallback((text) => {
+    window.clearTimeout(noticeTimerRef.current);
+
+    setNotice(text);
+
+    noticeTimerRef.current = window.setTimeout(() => {
+      if (mountedRef.current) {
+        setNotice("");
+      }
+    }, NOTICE_MS);
+  }, []);
+
+  React.useEffect(
+    () => () => window.clearTimeout(noticeTimerRef.current),
+    []
+  );
+
+  // What the message menu offers for this message.
+  const getMessageActions = (message) => {
+    const actions = [];
+
+    if (!message.deleted && message.text) {
+      actions.push("copy");
+    }
+
+    if (!message.deleted && message.attachment && message.attachment.id) {
+      actions.push("download");
+    }
+
+    actions.push("delete");
+
+    return actions;
+  };
+
+  // The arrow beside a message: the menu opens under the arrow.
   const openMessageMenu = (message, button) => {
     if (msgMenu && msgMenu.message.id === message.id) {
       setMsgMenu(null);
@@ -2106,12 +2301,16 @@ const PortCommunication = () => {
 
     const box = button.getBoundingClientRect();
 
+    const count = getMessageActions(message).length;
+
+    const height = count * MENU_ITEM_HEIGHT + MENU_PADDING;
+
     // Open downwards; if there is no room below, open upwards.
     const below = box.bottom + 4;
 
     const top =
-      below + MENU_HEIGHT > window.innerHeight
-        ? Math.max(8, box.top - MENU_HEIGHT - 4)
+      below + height > window.innerHeight
+        ? Math.max(8, box.top - height - 4)
         : below;
 
     const left = Math.min(
@@ -2119,7 +2318,153 @@ const PortCommunication = () => {
       Math.max(8, window.innerWidth - MENU_WIDTH - 8)
     );
 
+    setChatMenu(null);
+    setListMenuOpen(false);
     setMsgMenu({ message, left, top });
+  };
+
+  // Right-click on a message: the menu opens where the mouse is.
+  const openMessageMenuAt = (message, x, y) => {
+    const place = placeMenu(x, y, getMessageActions(message).length);
+
+    setChatMenu(null);
+    setListMenuOpen(false);
+    setEmojiOpen(false);
+    setMsgMenu({ message, ...place });
+  };
+
+  const copyMessage = async (message) => {
+    setMsgMenu(null);
+
+    // If part of the message is selected, copy just that part
+    // (like WhatsApp); otherwise copy the whole message.
+    let value = message.text || "";
+
+    try {
+      const selected = window.getSelection
+        ? String(window.getSelection() || "")
+        : "";
+
+      if (selected.trim() && value.includes(selected)) {
+        value = selected;
+      }
+    } catch {
+      // Use the whole message.
+    }
+
+    const done = await copyText(value);
+
+    showNotice(done ? "Message copied" : "The message could not be copied.");
+  };
+
+  const downloadMessageFile = (message) => {
+    setMsgMenu(null);
+
+    downloadAttachment(message.attachment).catch(() => {
+      if (mountedRef.current) {
+        showNotice("The document could not be downloaded.");
+      }
+    });
+  };
+
+  // Right-click on a chat in the list.
+  const getChatActions = (entry) => {
+    const actions = [];
+
+    if (entry.id && entry.lastMessage && entry.lastMessage.id && effectiveUnread(entry) > 0) {
+      actions.push("read");
+    }
+
+    actions.push(pinnedKeys.includes(entry.key) ? "unpin" : "pin");
+
+    if (entry.id && entry.lastMessage) {
+      actions.push("delete");
+    }
+
+    return actions;
+  };
+
+  const openChatMenu = (entry, x, y) => {
+    const place = placeMenu(x, y, getChatActions(entry).length);
+
+    setMsgMenu(null);
+    setListMenuOpen(false);
+    setChatMenu({ key: entry.key, ...place });
+  };
+
+  const togglePin = (entry) => {
+    setChatMenu(null);
+
+    const isPinned = pinnedKeys.includes(entry.key);
+
+    if (!isPinned && pinnedKeys.length >= MAX_PINNED) {
+      showNotice(`You can only pin up to ${MAX_PINNED} chats.`);
+
+      return;
+    }
+
+    const next = isPinned
+      ? pinnedKeys.filter((key) => key !== entry.key)
+      : [entry.key, ...pinnedKeys];
+
+    setPinnedKeys(next);
+    savePinned(next);
+
+    showNotice(isPinned ? "Chat unpinned" : "Chat pinned");
+  };
+
+  // "Mark as read" without opening the chat: everything up to the
+  // newest message counts as read (the server never goes past it).
+  const markChatRead = async (entry) => {
+    setChatMenu(null);
+
+    const lastId = Number(entry.lastMessage?.id) || 0;
+
+    if (!entry.id || !lastId) {
+      return;
+    }
+
+    const before = readPostedRef.current[entry.key] || 0;
+
+    readPostedRef.current[entry.key] = Math.max(before, lastId);
+
+    try {
+      await apiPost(`/chat/conversations/${entry.id}/read`, {
+        last_message_id: lastId,
+      });
+
+      if (!mountedRef.current) {
+        return;
+      }
+
+      setConversations((previous) =>
+        previous.map((item) =>
+          item.key === entry.key
+            ? {
+                ...item,
+                unread: 0,
+                myLastReadId: Math.max(item.myLastReadId, lastId),
+              }
+            : item
+        )
+      );
+
+      notifyUnreadChanged();
+    } catch (error) {
+      readPostedRef.current[entry.key] = before;
+
+      if (mountedRef.current) {
+        showNotice(
+          getErrorMessage(error, "The chat could not be marked as read.")
+        );
+      }
+    }
+  };
+
+  const openDeleteChatFromMenu = (entry) => {
+    setChatMenu(null);
+    setDialogError("");
+    setDialog({ kind: "chat", entry });
   };
 
   const openDeleteMessage = () => {
@@ -2193,12 +2538,17 @@ const PortCommunication = () => {
       )
     );
 
-    setSelectedKey(null);
-    setShowMobileChat(false);
-    setUnreadAnchor(null);
-    setNewBelow(0);
-    setShowScrollButton(false);
-    setEmojiOpen(false);
+    // A chat deleted from the right-click menu may not be the one that
+    // is open: the open chat then stays open.
+    if (selectedKeyRef.current === entry.key) {
+      setSelectedKey(null);
+      setShowMobileChat(false);
+      setUnreadAnchor(null);
+      setNewBelow(0);
+      setShowScrollButton(false);
+      setEmojiOpen(false);
+      setMsgMenu(null);
+    }
 
     notifyUnreadChanged();
     loadConversations();
@@ -2700,7 +3050,7 @@ const PortCommunication = () => {
   // Close the small menus when clicking somewhere else, pressing Esc
   // or resizing the window.
   React.useEffect(() => {
-    if (!msgMenu && !listMenuOpen) {
+    if (!msgMenu && !listMenuOpen && !chatMenu) {
       return undefined;
     }
 
@@ -2710,34 +3060,44 @@ const PortCommunication = () => {
       if (
         msgMenuRef.current?.contains(target) ||
         listMenuRef.current?.contains(target) ||
+        chatMenuRef.current?.contains(target) ||
         (target.closest && target.closest("[data-msg-menu-trigger]"))
       ) {
         return;
       }
 
       setMsgMenu(null);
+      setChatMenu(null);
       setListMenuOpen(false);
     };
 
     const handleKey = (event) => {
       if (event.key === "Escape") {
         setMsgMenu(null);
+        setChatMenu(null);
         setListMenuOpen(false);
       }
     };
 
-    const handleResize = () => setMsgMenu(null);
+    // A menu that opened at the mouse would be left floating in the
+    // wrong place, so it closes when the window or a list moves.
+    const handleMove = () => {
+      setMsgMenu(null);
+      setChatMenu(null);
+    };
 
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleKey);
-    window.addEventListener("resize", handleResize);
+    window.addEventListener("resize", handleMove);
+    window.addEventListener("wheel", handleMove, { passive: true });
 
     return () => {
       document.removeEventListener("mousedown", handleClick);
       document.removeEventListener("keydown", handleKey);
-      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("resize", handleMove);
+      window.removeEventListener("wheel", handleMove);
     };
-  }, [msgMenu, listMenuOpen]);
+  }, [msgMenu, listMenuOpen, chatMenu]);
 
   React.useEffect(() => {
     if (!lightbox) {
@@ -3146,7 +3506,18 @@ const PortCommunication = () => {
   const visibleConversations = (() => {
     const query = search.trim().toLowerCase();
 
-    return sortConversations(conversations).filter((entry) => {
+    // Pinned chats first (the most recently pinned at the top), then
+    // the others by their newest message, like WhatsApp.
+    const sorted = sortConversations(conversations);
+
+    const pinnedFirst = [
+      ...pinnedKeys
+        .map((key) => sorted.find((entry) => entry.key === key))
+        .filter(Boolean),
+      ...sorted.filter((entry) => !pinnedKeys.includes(entry.key)),
+    ];
+
+    return pinnedFirst.filter((entry) => {
       if (activeFilter === "Unread" && effectiveUnread(entry) === 0) {
         return false;
       }
@@ -3614,16 +3985,28 @@ const PortCommunication = () => {
 
               const isSelected = entry.key === selectedKey;
 
+              const isPinned = pinnedKeys.includes(entry.key);
+
+              const menuOnThisRow = chatMenu && chatMenu.key === entry.key;
+
               return (
                 <button
                   key={entry.key}
                   type="button"
                   onClick={() => handleSelectConversation(entry)}
+                  onContextMenu={(event) => {
+                    // Our own menu instead of the browser's (WhatsApp Web).
+                    event.preventDefault();
+                    openChatMenu(entry, event.clientX, event.clientY);
+                  }}
                   data-testid="conversation-row"
                   data-name={entry.name}
+                  data-pinned={isPinned ? "true" : "false"}
                   className={`group flex w-full min-w-0 flex-shrink-0 items-center gap-3 border-b border-gray-50 px-4 py-3.5 text-left transition dark:border-white/5 ${
                     isSelected
                       ? "bg-indigo-50 dark:bg-indigo-500/10"
+                      : menuOnThisRow
+                      ? "bg-gray-50 dark:bg-navy-700"
                       : "hover:bg-gray-50 dark:hover:bg-navy-700"
                   }`}
                 >
@@ -3668,6 +4051,14 @@ const PortCommunication = () => {
                       >
                         {getPreview(entry)}
                       </p>
+
+                      {isPinned && (
+                        <MdPushPin
+                          data-testid="row-pinned"
+                          aria-label="Pinned"
+                          className="h-4 w-4 flex-shrink-0 rotate-45 text-gray-400"
+                        />
+                      )}
 
                       {unread > 0 && (
                         <span
@@ -3879,6 +4270,7 @@ const PortCommunication = () => {
                           onRetry={handleRetry}
                           onDiscard={handleDiscard}
                           onOpenMenu={openMessageMenu}
+                          onOpenMenuAt={openMessageMenuAt}
                         />
                       );
                     })}
@@ -4086,15 +4478,112 @@ const PortCommunication = () => {
         </div>
       </div>
 
-      {/* MESSAGE MENU (the arrow beside a message) */}
+      {/* MESSAGE MENU (the arrow beside a message, or a right-click) */}
 
       {msgMenu && (
         <BodyPortal anchor={rootRef}>
-          <MessageMenu
+          <ContextMenu
             menu={msgMenu}
             menuRef={msgMenuRef}
-            onDelete={openDeleteMessage}
+            testId="message-menu"
+            items={getMessageActions(msgMenu.message).map((action) => {
+              if (action === "copy") {
+                return {
+                  key: "copy",
+                  label: "Copy",
+                  Icon: MdContentCopy,
+                  testId: "message-menu-copy",
+                  onClick: () => copyMessage(msgMenu.message),
+                };
+              }
+
+              if (action === "download") {
+                return {
+                  key: "download",
+                  label: "Download",
+                  Icon: MdFileDownload,
+                  testId: "message-menu-download",
+                  onClick: () => downloadMessageFile(msgMenu.message),
+                };
+              }
+
+              return {
+                key: "delete",
+                label: "Delete",
+                Icon: MdDeleteOutline,
+                danger: true,
+                testId: "message-menu-delete",
+                onClick: openDeleteMessage,
+              };
+            })}
           />
+        </BodyPortal>
+      )}
+
+      {/* CHAT MENU (right-click on a chat in the list) */}
+
+      {chatMenu &&
+        (() => {
+          const entry = conversations.find(
+            (item) => item.key === chatMenu.key
+          );
+
+          if (!entry) {
+            return null;
+          }
+
+          return (
+            <BodyPortal anchor={rootRef}>
+              <ContextMenu
+                menu={chatMenu}
+                menuRef={chatMenuRef}
+                testId="chat-menu"
+                items={getChatActions(entry).map((action) => {
+                  if (action === "read") {
+                    return {
+                      key: "read",
+                      label: "Mark as read",
+                      Icon: MdDoneAll,
+                      testId: "chat-menu-read",
+                      onClick: () => markChatRead(entry),
+                    };
+                  }
+
+                  if (action === "pin" || action === "unpin") {
+                    return {
+                      key: "pin",
+                      label: action === "pin" ? "Pin chat" : "Unpin chat",
+                      Icon: action === "pin" ? MdPushPin : MdOutlinePushPin,
+                      testId: "chat-menu-pin",
+                      onClick: () => togglePin(entry),
+                    };
+                  }
+
+                  return {
+                    key: "delete",
+                    label: "Delete chat",
+                    Icon: MdDeleteOutline,
+                    danger: true,
+                    testId: "chat-menu-delete",
+                    onClick: () => openDeleteChatFromMenu(entry),
+                  };
+                })}
+              />
+            </BodyPortal>
+          );
+        })()}
+
+      {/* SMALL NOTE AT THE BOTTOM ("Message copied") */}
+
+      {notice && (
+        <BodyPortal anchor={rootRef}>
+          <div
+            role="status"
+            data-testid="chat-notice"
+            className="fixed bottom-6 left-1/2 z-[2600] -translate-x-1/2 rounded-xl bg-navy-700 px-4 py-2.5 text-sm font-semibold text-white shadow-xl dark:bg-white dark:text-navy-700"
+          >
+            {notice}
+          </div>
         </BodyPortal>
       )}
 

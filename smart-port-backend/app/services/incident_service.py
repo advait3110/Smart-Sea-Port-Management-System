@@ -26,9 +26,19 @@ What this file does
   Management permission on for that role so they can act on it.)
   An incident has one assignment at a time: a person, a team or
   nobody.
+- An incident can carry a spot on the Live Port Map (latitude and
+  longitude). Incidents reported by right-clicking the map have one;
+  incidents reported in Port Alerts or Incident Management do not.
+  Every account that can open the map sees the open ones there.
 - Bell notifications (the same bell as the chat and the gate):
-    new incident     -> accounts with the Incidents feature
-                        (a CRITICAL incident -> every active account)
+    new incident     -> the accounts whose designation deals with that
+                        type of incident (see TYPE_TEAMS), plus the Port
+                        Operations Manager and the Port Administrator,
+                        plus accounts of other (custom) roles that have
+                        the Incidents feature.
+                        A CRITICAL incident -> every active account.
+                        If the incident is on the map, the accounts that
+                        can open the map are told to look there.
     assigned to me   -> the assigned account (or every account of the
                         assigned designation)
     no longer mine   -> the account(s) that were assigned before
@@ -140,6 +150,32 @@ NUMBER_ATTEMPTS = 5
 
 CATEGORY = "Incident"
 
+MAP_FEATURE_KEY = "port_map"
+
+# Who must know about a new incident, by its type (the designation
+# names as in DESIGNATIONS).
+TYPE_TEAMS = {
+    "Vessel Incident": ["Vessel Management Officer"],
+    "Equipment Failure": ["Maintenance Officer"],
+    "Gate/Security Incident": ["Gate & Truck Officer", "Security Officer"],
+    "Environmental Incident": [],
+    "Fire/Safety": ["Security Officer"],
+    "Injury / Medical": ["Security Officer"],
+    "Cargo Damage": ["Cargo Officer"],
+    "Other": [],
+}
+
+# Told about every new incident, whatever its type.
+ALWAYS_TOLD = ["Port Operations Manager", "Port Administrator"]
+
+# A map spot must lie in and around the Port of Singapore.
+MAP_BOUNDS = {
+    "south": 1.0,
+    "north": 1.6,
+    "west": 103.4,
+    "east": 104.3,
+}
+
 
 # =========================================================
 # TABLES
@@ -176,6 +212,14 @@ SCHEMA_STATEMENTS = [
     """
     ALTER TABLE port_incidents
         ADD COLUMN IF NOT EXISTS assigned_role VARCHAR(80)
+    """,
+    """
+    ALTER TABLE port_incidents
+        ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION
+    """,
+    """
+    ALTER TABLE port_incidents
+        ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION
     """,
     """
     CREATE INDEX IF NOT EXISTS ix_port_incidents_occurred
@@ -333,7 +377,8 @@ _COLUMNS = """
     id, incident_year, year_seq, incident_type, location, severity,
     status, vessel, description, reported_by_id, reported_by_name,
     reported_by_role, assigned_to_id, assigned_to_name, assigned_role,
-    occurred_at, created_at, updated_at, resolved_at
+    occurred_at, created_at, updated_at, resolved_at,
+    latitude, longitude
 """
 
 
@@ -368,6 +413,16 @@ def _incident_payload(
         "created_at": iso(row["created_at"]),
         "updated_at": iso(row["updated_at"]),
         "resolved_at": iso(row["resolved_at"]),
+        "latitude": (
+            float(row["latitude"])
+            if row.get("latitude") is not None
+            else None
+        ),
+        "longitude": (
+            float(row["longitude"])
+            if row.get("longitude") is not None
+            else None
+        ),
         "can_delete": bool(actor["admin"]),
     }
 
@@ -617,6 +672,70 @@ def _assigned_ids(db: Session, row: dict[str, Any]) -> list[int]:
     return []
 
 
+def _new_incident_recipients(
+    db: Session,
+    incident_type: str,
+) -> list[int]:
+    """
+    Who is told about a new (not critical) incident:
+    - the designations that deal with this type (TYPE_TEAMS),
+    - the Port Operations Manager and the Port Administrator,
+    - accounts of other (custom) roles that have the Incidents
+      feature (they were given incidents on purpose).
+    """
+
+    wanted = {
+        name.lower()
+        for name in TYPE_TEAMS.get(incident_type, []) + ALWAYS_TOLD
+    }
+
+    fixed = {name.lower() for name in DESIGNATIONS}
+
+    recipients = []
+
+    for person in get_directory(db):
+
+        if not person["active"]:
+            continue
+
+        role = _single_line(person["role"]).lower()
+
+        if (
+            role in wanted
+            or role in ADMIN_ROLE_NAMES
+            or (role not in fixed and FEATURE_KEY in person["features"])
+        ):
+            recipients.append(person["id"])
+
+    return recipients
+
+
+def _map_point(latitude: Any, longitude: Any) -> tuple[float, float] | None:
+    """The map spot of a new incident, or None when there is none."""
+
+    if latitude is None and longitude is None:
+        return None
+
+    try:
+        lat = float(latitude)
+        lng = float(longitude)
+    except (TypeError, ValueError):
+        raise _fail("The map spot is not valid.") from None
+
+    if lat != lat or lng != lng:
+        raise _fail("The map spot is not valid.")
+
+    if not (
+        MAP_BOUNDS["south"] <= lat <= MAP_BOUNDS["north"]
+        and MAP_BOUNDS["west"] <= lng <= MAP_BOUNDS["east"]
+    ):
+        raise _fail(
+            "The map spot must be in or near the Port of Singapore."
+        )
+
+    return round(lat, 6), round(lng, 6)
+
+
 def _resolve_designation(value: Any) -> str:
     """The designation as it is written in the fixed list."""
 
@@ -705,8 +824,13 @@ def create_incident(
     description: Any,
     vessel: Any,
     occurred_at: Any,
+    latitude: Any = None,
+    longitude: Any = None,
 ) -> dict[str, Any]:
-    """An employee reports a new incident."""
+    """
+    An employee reports a new incident. latitude / longitude are the
+    spot on the Live Port Map (both given, or neither).
+    """
 
     actor = _actor(user)
 
@@ -756,6 +880,8 @@ def create_incident(
 
     happened = _occurred_at(occurred_at, now)
 
+    point = _map_point(latitude, longitude)
+
     incident_id = None
 
     for attempt in range(NUMBER_ATTEMPTS):
@@ -780,9 +906,10 @@ def create_incident(
                     "location, severity, status, vessel, "
                     "description, reported_by_id, "
                     "reported_by_name, reported_by_role, "
-                    "occurred_at, created_at, updated_at) "
+                    "occurred_at, created_at, updated_at, "
+                    "latitude, longitude) "
                     "VALUES (:y, :q, :ty, :lo, :se, :st, :ve, "
-                    ":de, :rb, :rn, :rr, :oc, :cr, :up) "
+                    ":de, :rb, :rn, :rr, :oc, :cr, :up, :la, :ln) "
                     "RETURNING id"
                 ),
                 {
@@ -800,6 +927,8 @@ def create_incident(
                     "oc": happened,
                     "cr": now,
                     "up": now,
+                    "la": point[0] if point else None,
+                    "ln": point[1] if point else None,
                 },
             ).scalar()
 
@@ -846,21 +975,52 @@ def create_incident(
         ]
         kind = "error"
     else:
-        recipients = [
+        recipients = _new_incident_recipients(db, clean_type)
+        kind = "warning" if clean_severity == "High" else "info"
+
+    recipients = [
+        user_id for user_id in recipients if user_id != actor["id"]
+    ]
+
+    plain_message = (
+        f"{_number(row)}: {clean_type} at {clean_location}. "
+        f"{_short(clean_description)}"
+    )
+
+    # An incident on the map: the accounts that can open the map are
+    # told to look there; the others get the usual message.
+    map_viewers = set()
+
+    if point is not None:
+        map_viewers = {
             person["id"]
             for person in people
-            if person["active"] and FEATURE_KEY in person["features"]
-        ]
-        kind = "warning" if clean_severity == "High" else "info"
+            if MAP_FEATURE_KEY in person["features"]
+        }
+
+    on_map = [user_id for user_id in recipients if user_id in map_viewers]
+    off_map = [
+        user_id for user_id in recipients if user_id not in map_viewers
+    ]
 
     _notify(
         db,
-        [user_id for user_id in recipients if user_id != actor["id"]],
-        title=f"{clean_severity} incident reported",
+        on_map,
+        title=f"{clean_severity} incident on the map",
         message=(
             f"{_number(row)}: {clean_type} at {clean_location}. "
+            "Open Live Port Map to see where it is. "
             f"{_short(clean_description)}"
         ),
+        kind=kind,
+        dedupe_key=f"incident-new:{incident_id}",
+    )
+
+    _notify(
+        db,
+        off_map,
+        title=f"{clean_severity} incident reported",
+        message=plain_message,
         kind=kind,
         dedupe_key=f"incident-new:{incident_id}",
     )

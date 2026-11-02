@@ -359,6 +359,235 @@ const isSessionRejected = (error) => {
 };
 
 // =========================================================
+// KEEPING THE LOGIN ALIVE (AUTOMATIC SIGN-OUT PROTECTION)
+// =========================================================
+//
+// The admin layout asks the backend "is this login still
+// valid?" every few seconds (refreshCurrentUser below).
+//
+// Before this protection, the very first "no" from the
+// backend signed the person out at once, with no second try
+// and no message. That is why the app seemed to sign people
+// out "suddenly": the login token simply ran out while they
+// were working.
+//
+// Now:
+// 1. While the person is working, the token is renewed
+//    quietly before it runs out (POST /auth/refresh).
+// 2. A "no" from the backend is checked once more before
+//    anybody is signed out.
+// 3. If a real sign-out still has to happen, a short message
+//    says why.
+//
+
+// When no "issued at" time is inside the token, renew once
+// less than this much time is left.
+const RENEW_FALLBACK_LEFT_MS = 10 * 60 * 1000;
+
+// Renew once less than this share of the token's life is left.
+const RENEW_LEFT_SHARE = 0.5;
+
+// How long to wait before the second check of a "no".
+const RECHECK_DELAY_MS = 2000;
+
+// How long the "you were signed out" message stays visible.
+const SIGNED_OUT_NOTICE_MS = 12000;
+
+const SIGNED_OUT_NOTICE_ID = "port-signed-out-notice";
+
+const wait = (milliseconds) =>
+  new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+
+// Reads the "expires at" and "issued at" times from the token.
+// Returns null when the token cannot be read.
+const readTokenTimes = (token) => {
+  try {
+    const payloadPart = String(token || "").split(".")[1];
+
+    if (!payloadPart) {
+      return null;
+    }
+
+    const base64 = payloadPart
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
+
+    const padded =
+      base64 +
+      "=".repeat((4 - (base64.length % 4)) % 4);
+
+    const payload = JSON.parse(window.atob(padded));
+
+    if (typeof payload.exp !== "number") {
+      return null;
+    }
+
+    return {
+      expiresAt: payload.exp * 1000,
+      issuedAt:
+        typeof payload.iat === "number"
+          ? payload.iat * 1000
+          : null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+let tokenRenewal = null;
+
+// Gets a fresh token from the backend when the current one is
+// getting old. Never signs anybody out: if renewing fails,
+// the normal check that follows decides what happens.
+const renewTokenIfNeeded = async () => {
+  if (tokenRenewal) {
+    return tokenRenewal;
+  }
+
+  const token = sessionStorage.getItem(
+    ACCESS_TOKEN_KEY
+  );
+
+  const times = readTokenTimes(token);
+
+  if (!times) {
+    return null;
+  }
+
+  const timeLeft = times.expiresAt - Date.now();
+
+  // Already run out: renewing cannot work any more.
+  if (timeLeft <= 0) {
+    return null;
+  }
+
+  const threshold = times.issuedAt
+    ? (times.expiresAt - times.issuedAt) *
+      RENEW_LEFT_SHARE
+    : RENEW_FALLBACK_LEFT_MS;
+
+  if (timeLeft > threshold) {
+    return null;
+  }
+
+  tokenRenewal = (async () => {
+    try {
+      const response = await apiPost(
+        "/auth/refresh",
+        {}
+      );
+
+      const newToken = response?.access_token;
+
+      // Only store it if this tab still holds the same login.
+      if (
+        newToken &&
+        sessionStorage.getItem(ACCESS_TOKEN_KEY) ===
+          token
+      ) {
+        sessionStorage.setItem(
+          ACCESS_TOKEN_KEY,
+          newToken
+        );
+      }
+    } catch (error) {
+      console.warn(
+        "Could not renew the login token:",
+        error
+      );
+    } finally {
+      tokenRenewal = null;
+    }
+
+    return null;
+  })();
+
+  return tokenRenewal;
+};
+
+// A short message at the top of the screen. It is added to the
+// page itself (not to one screen), so it stays visible while the
+// app moves to the sign-in page.
+const showSignedOutNotice = (message) => {
+  try {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const existing = document.getElementById(
+      SIGNED_OUT_NOTICE_ID
+    );
+
+    if (existing) {
+      existing.remove();
+    }
+
+    const box = document.createElement("div");
+
+    box.id = SIGNED_OUT_NOTICE_ID;
+    box.setAttribute("role", "alert");
+    box.textContent = message;
+
+    Object.assign(box.style, {
+      position: "fixed",
+      top: "16px",
+      left: "50%",
+      transform: "translateX(-50%)",
+      zIndex: "99999",
+      maxWidth: "90vw",
+      padding: "12px 20px",
+      borderRadius: "12px",
+      background: "#1b2559",
+      color: "#ffffff",
+      fontSize: "14px",
+      fontWeight: "600",
+      lineHeight: "1.4",
+      boxShadow: "0 10px 30px rgba(0, 0, 0, 0.25)",
+      cursor: "pointer",
+    });
+
+    box.addEventListener("click", () => {
+      box.remove();
+    });
+
+    document.body.appendChild(box);
+
+    window.setTimeout(() => {
+      box.remove();
+    }, SIGNED_OUT_NOTICE_MS);
+  } catch {
+    // The message is a courtesy. Never let it break sign-out.
+  }
+};
+
+// Turns the backend's "no" into a sentence the person can read.
+const explainRejection = (error) => {
+  const text = String(
+    getReadableErrorMessage(error) || ""
+  ).toLowerCase();
+
+  if (text.includes("expired")) {
+    return "Your login has expired, so you were signed out. Please sign in again.";
+  }
+
+  if (text.includes("inactive")) {
+    return "Your account has been made inactive. Please contact the Port Administrator.";
+  }
+
+  if (text.includes("does not exist")) {
+    return "Your account no longer exists. Please contact the Port Administrator.";
+  }
+
+  if (text.includes("valid role")) {
+    return "Your account has no role assigned. Please contact the Port Administrator.";
+  }
+
+  return "You were signed out because the server no longer accepted your login. Please sign in again.";
+};
+
+// =========================================================
 // REQUEST CURRENT BACKEND USER (THROWS ON FAILURE)
 // =========================================================
 //
@@ -658,32 +887,91 @@ export const login = async (
 //
 // Failure policy:
 // - 401 / 403 from /auth/me  -> the backend rejected this
-//   session. Log out (fail closed).
+//   session. It is asked ONE more time a moment later. If it
+//   says no again, log out (fail closed) and show a message
+//   that says why.
 // - Network error / 5xx      -> temporary. Keep the current
 //   session and its CURRENT permissions. Nothing is added.
 //
+// While the person is working, the login token is renewed
+// quietly before it runs out, so it does not expire under
+// them.
+//
 
-export const refreshCurrentUser = async () => {
-  let backendUser = null;
+// The backend said "no". Ask once more before signing anybody
+// out. Returns the user when the second answer is "yes";
+// returns null when the person was signed out or when the
+// second try failed for a temporary reason.
+const confirmRejection = async (firstError) => {
+  const rejectedToken = sessionStorage.getItem(
+    ACCESS_TOKEN_KEY
+  );
+
+  console.warn(
+    "Backend refused this login. Checking once more before signing out.",
+    firstError
+  );
+
+  await wait(RECHECK_DELAY_MS);
+
+  // The person signed out, or signed in again, in the
+  // meantime. There is nothing left to decide.
+  if (
+    sessionStorage.getItem(ACCESS_TOKEN_KEY) !==
+    rejectedToken
+  ) {
+    return null;
+  }
 
   try {
-    backendUser = await requestCurrentBackendUser();
-  } catch (error) {
-    if (isSessionRejected(error)) {
+    return await requestCurrentBackendUser();
+  } catch (secondError) {
+    if (isSessionRejected(secondError)) {
       console.warn(
-        "Session rejected by backend. Logging out."
+        "Session rejected by backend twice. Logging out.",
+        secondError
       );
 
       logout();
+      showSignedOutNotice(
+        explainRejection(secondError)
+      );
+
       return null;
     }
 
     console.error(
       "Temporary failure refreshing current user:",
-      error
+      secondError
     );
 
     return null;
+  }
+};
+
+export const refreshCurrentUser = async () => {
+  let backendUser = null;
+
+  // Renew the login first if it is getting old.
+  await renewTokenIfNeeded();
+
+  try {
+    backendUser = await requestCurrentBackendUser();
+  } catch (error) {
+    if (isSessionRejected(error)) {
+      backendUser = await confirmRejection(error);
+
+      if (!backendUser) {
+        return null;
+      }
+    } else {
+      console.error(
+        "Temporary failure refreshing current user:",
+        error
+      );
+
+      return null;
+    }
   }
 
   if (!backendUser) {
@@ -692,6 +980,11 @@ export const refreshCurrentUser = async () => {
 
   if (backendUser.is_active === false) {
     logout();
+
+    showSignedOutNotice(
+      "Your account has been made inactive. Please contact the Port Administrator."
+    );
+
     return null;
   }
 

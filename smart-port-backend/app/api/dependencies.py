@@ -138,6 +138,17 @@ def get_current_user(
     except HTTPException:
         raise
 
+    except jwt.ExpiredSignatureError:
+        # The token ran out of time. Said clearly so the app can
+        # tell the person why they were signed out.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "Your login has expired. "
+                "Please sign in again."
+            ),
+        ) from None
+
     except (
         jwt.InvalidTokenError,
         ValueError,
