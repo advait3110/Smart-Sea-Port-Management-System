@@ -1064,8 +1064,51 @@ export const refreshCurrentUser = async () => {
 // LOGOUT
 // =========================================================
 
+// The address of the FastAPI backend (the same one services/api.js
+// uses).
+const PRESENCE_API_BASE_URL = (() => {
+  try {
+    return (
+      process.env.REACT_APP_API_BASE_URL ||
+      "http://127.0.0.1:8000"
+    );
+  } catch {
+    return "http://127.0.0.1:8000";
+  }
+})();
+
+// Tells the server that this account has logged out, so User & Role
+// Management shows it as Offline at once (instead of after about
+// 90 seconds). It is sent with the login of this tab BEFORE that
+// login is removed. "keepalive" lets it finish even though the page
+// moves on to the login screen. If it fails, the account still turns
+// Offline by itself after about 90 seconds.
+const tellServerLoggedOut = () => {
+  try {
+    const token = sessionStorage.getItem(ACCESS_TOKEN_KEY);
+
+    if (!token || typeof fetch !== "function") {
+      return;
+    }
+
+    fetch(`${PRESENCE_API_BASE_URL}/presence/logout`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      keepalive: true,
+    }).catch(() => {
+      // Not important: see above.
+    });
+  } catch {
+    // Not important: see above.
+  }
+};
+
 export const logout = () => {
   try {
+    tellServerLoggedOut();
+
     stopSessionHeartbeat();
 
     // Removes only this browser tab's session.

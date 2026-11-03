@@ -49,9 +49,15 @@ WRITE_EVERY_SECONDS = 10
 
 LOGOUT_PATHS = ("/presence/logout",)
 
+# After a logout, requests that were already on their way from that
+# browser tab (the bell, the lists) must not make the account Online
+# again. They are ignored for this many seconds.
+LOGOUT_QUIET_SECONDS = 5
+
 
 _lock = threading.Lock()
 _written: dict[int, float] = {}
+_quiet_until: dict[int, float] = {}
 _table_ready = False
 
 
@@ -91,6 +97,14 @@ def touch(user_id: int) -> None:
         now = time.monotonic()
 
         with _lock:
+            quiet = _quiet_until.get(user_id)
+
+            if quiet is not None:
+                if now < quiet:
+                    return
+
+                _quiet_until.pop(user_id, None)
+
             last = _written.get(user_id)
 
             if last is not None and now - last < WRITE_EVERY_SECONDS:
@@ -163,6 +177,9 @@ def record_request(user_id: int, path: str) -> None:
         if clean.endswith(LOGOUT_PATHS):
             with _lock:
                 _written.pop(user_id, None)
+                _quiet_until[user_id] = (
+                    time.monotonic() + LOGOUT_QUIET_SECONDS
+                )
 
             session = SessionLocal()
 
