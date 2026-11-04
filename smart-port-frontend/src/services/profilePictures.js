@@ -14,8 +14,10 @@
 // again:
 // - when someone changes their own picture in this browser
 //   (the "singapore-profile-changed" event), and
-// - every 60 seconds while a page that uses them is open, so a
-//   new picture uploaded by a colleague appears by itself.
+// - every 5 minutes while a page that uses them is open, so a
+//   new picture uploaded by a colleague appears by itself. (Not
+//   more often: every picture is downloaded each time, which is
+//   slow on weak college Wi-Fi or mobile data.)
 //
 // Usage inside a component:
 //
@@ -28,7 +30,7 @@ import React from "react";
 import { apiGet } from "./api";
 import { PROFILE_EVENT } from "./profile";
 
-const REFRESH_MS = 60 * 1000;
+const REFRESH_MS = 5 * 60 * 1000;
 
 let pictures = {};
 let loadedAt = 0;

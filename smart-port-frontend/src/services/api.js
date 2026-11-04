@@ -211,6 +211,70 @@ const getReadableErrorMessage = (
 };
 
 // =========================================================
+// WEAK NETWORKS (college Wi-Fi, mobile data)
+// =========================================================
+//
+// - A GET request that gets no answer within GET_TIMEOUT_MS is
+//   stopped, so a page never shows "Loading..." for ever.
+// - A GET request that fails because of the network (or because
+//   the server was briefly busy: 502, 503, 504) is tried again
+//   once, after RETRY_DELAY_MS.
+// - POST, PUT and DELETE are never repeated automatically (a
+//   repeated "save" could save twice) and get no time limit,
+//   because uploads and ML training can take a while.
+
+const GET_TIMEOUT_MS = 30000;
+
+const RETRY_DELAY_MS = 1500;
+
+const RETRY_STATUSES = [502, 503, 504];
+
+const wait = (ms) =>
+  new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+
+// fetch() with a time limit. A request that takes too long is
+// stopped and reported as a TIMEOUT error.
+const fetchWithTimeout = async (url, options, timeoutMs) => {
+  if (
+    !timeoutMs ||
+    options.signal ||
+    typeof AbortController === "undefined"
+  ) {
+    return fetch(url, options);
+  }
+
+  const controller = new AbortController();
+
+  let timedOut = false;
+
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (timedOut) {
+      const timeoutError = new Error("timeout");
+
+      timeoutError.isTimeout = true;
+
+      throw timeoutError;
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
+};
+
+// =========================================================
 // API REQUEST
 // =========================================================
 
@@ -275,31 +339,72 @@ const apiRequest = async (
   // Request
   // -------------------------------------------------------
 
+  const method = String(
+    options.method || "GET"
+  ).toUpperCase();
+
+  const isGet = method === "GET";
+
+  const url = `${API_BASE_URL}${normalizedEndpoint}`;
+
+  const requestOptions = {
+    ...options,
+    headers,
+  };
+
+  // GET requests: at most 2 tries. Other requests: 1 try.
+  const tries = isGet ? 2 : 1;
+
   let response;
 
-  try {
-    response = await fetch(
-      `${API_BASE_URL}${normalizedEndpoint}`,
-      {
-        ...options,
-        headers,
+  for (let attempt = 1; attempt <= tries; attempt += 1) {
+    const lastTry = attempt === tries;
+
+    try {
+      response = await fetchWithTimeout(
+        url,
+        requestOptions,
+        isGet ? GET_TIMEOUT_MS : 0
+      );
+    } catch (error) {
+      if (!lastTry) {
+        await wait(RETRY_DELAY_MS);
+
+        continue;
       }
-    );
-  } catch (error) {
-    console.error(
-      "API network error:",
-      error
-    );
 
-    const networkError = new Error(
-      "Unable to connect to the Port of Singapore backend. Please make sure the FastAPI server is running."
-    );
+      console.error(
+        "API network error:",
+        error
+      );
 
-    networkError.status = 0;
-    networkError.code = "NETWORK_ERROR";
-    networkError.originalError = error;
+      const networkError = new Error(
+        error && error.isTimeout
+          ? "The Port of Singapore server is taking too long to answer. The internet connection may be slow. The page will try again."
+          : "Cannot reach the Port of Singapore server. Please check the internet connection. The page will try again."
+      );
 
-    throw networkError;
+      networkError.status = 0;
+      networkError.code =
+        error && error.isTimeout
+          ? "TIMEOUT"
+          : "NETWORK_ERROR";
+      networkError.originalError = error;
+
+      throw networkError;
+    }
+
+    // The server was briefly busy: try a GET once more.
+    if (
+      !lastTry &&
+      RETRY_STATUSES.includes(response.status)
+    ) {
+      await wait(RETRY_DELAY_MS);
+
+      continue;
+    }
+
+    break;
   }
 
   // =======================================================
