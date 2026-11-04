@@ -89,6 +89,26 @@ const normalizeSummary = (data) => {
   };
 };
 
+// The id of the newest UNREAD notification in the bell list, or
+// null when there is none. Used to notice a new notification.
+const newestUnreadNotificationId = (recent) => {
+  let newest = null;
+
+  (Array.isArray(recent) ? recent : []).forEach((item) => {
+    if (!item || item.kind !== "notification" || !item.unread) {
+      return;
+    }
+
+    const id = Number(item.id);
+
+    if (Number.isFinite(id) && (newest === null || id > newest)) {
+      newest = id;
+    }
+  });
+
+  return newest;
+};
+
 // Puts the unread number in front of the browser tab name, like
 // WhatsApp Web: "(2) Port of Singapore". It can be seen on this tab
 // even while you are working in another tab.
@@ -216,10 +236,17 @@ const Navbar = (props) => {
   // Unread chat messages seen at the last refresh (null = not yet).
   const previousUnreadRef = React.useRef(null);
 
+  // Unread notifications and the newest notification seen at the
+  // last refresh (null = not yet), so a NEW notification beeps too.
+  const previousNotificationsRef = React.useRef(null);
+  const newestNotificationIdRef = React.useRef(null);
+
   React.useEffect(() => {
     if (!isSignedIn) {
       setSummary(EMPTY_SUMMARY);
       previousUnreadRef.current = null;
+      previousNotificationsRef.current = null;
+      newestNotificationIdRef.current = null;
       showCountInTabTitle(0);
 
       return undefined;
@@ -261,6 +288,38 @@ const Navbar = (props) => {
           }
 
           previousUnreadRef.current = next.unreadMessages;
+
+          // A new notification (incident, alert, maintenance,
+          // announcement...) beeps on every page, the chat page too.
+          // The first refresh after opening the page only learns what
+          // is already there, so old notifications never beep.
+          const newestId = newestUnreadNotificationId(next.recent);
+
+          const firstLoad =
+            previousNotificationsRef.current === null;
+
+          const newArrived =
+            !firstLoad &&
+            ((newestId !== null &&
+              (newestNotificationIdRef.current === null ||
+                newestId > newestNotificationIdRef.current)) ||
+              next.unreadNotifications >
+                previousNotificationsRef.current);
+
+          if (newArrived) {
+            playMessageBeep();
+          }
+
+          previousNotificationsRef.current =
+            next.unreadNotifications;
+
+          if (
+            newestId !== null &&
+            (newestNotificationIdRef.current === null ||
+              newestId > newestNotificationIdRef.current)
+          ) {
+            newestNotificationIdRef.current = newestId;
+          }
 
           setSummary(next);
 
