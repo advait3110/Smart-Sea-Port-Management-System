@@ -148,6 +148,62 @@ const PORT_TIME_ZONE = "Asia/Singapore";
 
 const DATA_REFRESH_INTERVAL = 30000;
 
+/* =========================================================
+   FAST START (weak networks)
+
+   The ships of the last successful load are kept in this
+   browser. They are real records from the database (nothing is
+   made up), so the next visit draws them at once while the
+   latest positions are loading; then they are replaced. Older
+   positions are drawn faded as usual. Kept for 24 hours.
+   ========================================================= */
+
+const SHIP_CACHE_KEY = "singaporePortMapShips";
+
+const SHIP_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+const readShipCache = () => {
+  try {
+    const saved = JSON.parse(
+      window.localStorage.getItem(SHIP_CACHE_KEY) || "null"
+    );
+
+    if (
+      !saved ||
+      !Array.isArray(saved.records) ||
+      !Number.isFinite(saved.savedAt) ||
+      Date.now() - saved.savedAt > SHIP_CACHE_MAX_AGE_MS
+    ) {
+      return null;
+    }
+
+    return saved.records;
+  } catch {
+    return null;
+  }
+};
+
+const saveShipCache = (records) => {
+  try {
+    window.localStorage.setItem(
+      SHIP_CACHE_KEY,
+      JSON.stringify({ savedAt: Date.now(), records })
+    );
+  } catch {
+    /* Storage full or blocked: the map works without it. */
+  }
+};
+
+/* Map pictures (tiles). CARTO's map server answers from a nearby
+   copy of the map in many countries, so it loads much faster
+   than the main OpenStreetMap server, especially on slow
+   networks. It shows the same OpenStreetMap data. */
+const DEFAULT_TILE_URL =
+  "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png";
+
+const DEFAULT_TILE_ATTRIBUTION =
+  "&copy; OpenStreetMap contributors &copy; CARTO";
+
 /* A saved position older than this is drawn faded and counted as
    "older". Same rule as the Vessels page. Display only. */
 const STALE_POSITION_MINUTES = 120;
@@ -1426,6 +1482,9 @@ const PortMap = () => {
   const mountedRef = React.useRef(true);
   const requestCounterRef = React.useRef(0);
 
+  /* True while the ships of the last visit are shown. */
+  const cachedNoticeRef = React.useRef(false);
+
   const fetchMapData = React.useCallback(async () => {
     requestCounterRef.current += 1;
 
@@ -1457,6 +1516,20 @@ const PortMap = () => {
 
         /* Only moored / at-berth and anchored ships are kept. */
         const inPort = withPosition.filter((vessel) => vessel.portState);
+
+        /* Remembered for a fast start next time (see FAST START). */
+        saveShipCache(
+          records.filter((record) => {
+            const vessel = normalizeAisVessel(record);
+
+            return Boolean(vessel && vessel.portState);
+          })
+        );
+
+        if (cachedNoticeRef.current) {
+          cachedNoticeRef.current = false;
+          setMapMessage("");
+        }
 
         setVessels(inPort);
         setHiddenVesselCount(withPosition.length - inPort.length);
@@ -1529,9 +1602,43 @@ const PortMap = () => {
   React.useEffect(() => {
     mountedRef.current = true;
 
+    /* Fast start: draw the ships of the last visit at once. */
+    const cached = readShipCache();
+
+    if (cached) {
+      const fromCache = cached
+        .map(normalizeAisVessel)
+        .filter((vessel) => vessel && vessel.portState);
+
+      if (fromCache.length > 0) {
+        setVessels(fromCache);
+
+        cachedNoticeRef.current = true;
+
+        setMapMessage(
+          "Showing the ships from your last visit. The latest positions are loading…"
+        );
+      }
+    }
+
     fetchMapData();
 
-    const interval = setInterval(fetchMapData, DATA_REFRESH_INTERVAL);
+    /* While this browser tab is hidden nothing is downloaded (saves
+       the network for the tab you are using); coming back loads the
+       latest data at once. */
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "hidden") {
+        fetchMapData();
+      }
+    }, DATA_REFRESH_INTERVAL);
+
+    const handleVisible = () => {
+      if (document.visibilityState === "visible") {
+        fetchMapData();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisible);
 
     /* A new or changed incident (live alerts, if installed): reload. */
     window.addEventListener("singapore-incidents-changed", fetchMapData);
@@ -1539,6 +1646,7 @@ const PortMap = () => {
     return () => {
       mountedRef.current = false;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisible);
       window.removeEventListener("singapore-incidents-changed", fetchMapData);
       window.clearTimeout(mapMessageTimerRef.current);
     };
@@ -2399,8 +2507,12 @@ const PortMap = () => {
 
             {mapType === "default" && (
               <TileLayer
-                attribution="&copy; OpenStreetMap contributors"
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution={DEFAULT_TILE_ATTRIBUTION}
+                url={DEFAULT_TILE_URL}
+                subdomains="abcd"
+                maxZoom={20}
+                keepBuffer={4}
+                updateWhenZooming={false}
               />
             )}
 
@@ -2412,6 +2524,8 @@ const PortMap = () => {
               <TileLayer
                 attribution="&copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community"
                 url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                keepBuffer={4}
+                updateWhenZooming={false}
               />
             )}
 
