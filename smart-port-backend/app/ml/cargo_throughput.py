@@ -36,6 +36,7 @@ import json
 import math
 import re
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -690,9 +691,6 @@ def forecast_yearly(series: dict[int, float], report: dict[str, Any],
 # SAVED MODELS (one per series, retrained when its figures change)
 # =========================================================
 
-_lock = threading.Lock()
-
-
 def _paths(key: str) -> tuple[Path, Path]:
     safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", key)[:60] or "series"
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:8]
@@ -715,31 +713,135 @@ def _load(key: str):
     return report, bundle
 
 
+_lock = threading.Lock()
+
+# The answer must not wait for training: a page request waits at most
+# this long, then the training carries on in the background and the page
+# asks again (Nginx and browsers give up on very long requests).
+WAIT_SECONDS = 8.0
+
+# Reports and models already read, so a request does not open every file
+# again: key -> (fingerprint, report, bundle).
+_memory: dict[str, tuple[str, dict[str, Any], Any]] = {}
+# Training waiting or running: key -> (fingerprint, frequency, series).
+_queue: dict[str, tuple[str, str, dict[int, float]]] = {}
+# Training that failed: key -> (fingerprint, message). Not retried until
+# the figures change, so a broken series cannot keep the worker busy.
+_failed: dict[str, tuple[str, str]] = {}
+_queue_changed = threading.Condition(_lock)
+_worker: threading.Thread | None = None
+
+
+def cached(key: str, current: str):
+    """(report, bundle) of these exact figures, or None when not trained yet."""
+
+    with _lock:
+        hit = _memory.get(key)
+    if hit and hit[0] == current:
+        return hit[1], hit[2]
+    report, bundle = _load(key)
+    if report and report.get("fingerprint") == current:
+        if bundle is not None and bundle.get("fingerprint") != current:
+            bundle = None
+        with _lock:
+            _memory[key] = (current, report, bundle)
+        return report, bundle
+    return None
+
+
+def _save(key: str, report: dict[str, Any], bundle: Any) -> None:
+    model_file, metrics_file = _paths(key)
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    if bundle is not None:
+        _ml()[0].dump(bundle, model_file)
+    elif model_file.exists():
+        model_file.unlink()
+    metrics_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+
+def _work() -> None:
+    """The background trainer: one series at a time, newest request first."""
+
+    global _worker
+    while True:
+        with _lock:
+            if not _queue:
+                _worker = None
+                return
+            key = next(reversed(_queue))
+            current, frequency, series = _queue[key]
+        try:
+            report = train_monthly(series) if frequency == "monthly" else train_yearly(series)
+            bundle = report.pop("bundle", None)
+            _save(key, report, bundle)
+            failure = None
+        except MLPackagesMissing as exc:
+            report, bundle, failure = None, None, str(exc)
+        except Exception as exc:  # one broken series must not stop the others
+            report, bundle = None, None
+            failure = f"The model could not be trained ({type(exc).__name__})."
+        with _lock:
+            if failure is None:
+                _memory[key] = (current, report, bundle)
+                _failed.pop(key, None)
+            else:
+                _failed[key] = (current, failure)
+            if _queue.get(key, (None,))[0] == current:
+                del _queue[key]
+            _queue_changed.notify_all()
+
+
+def schedule(key: str, frequency: str, series: dict[int, float]) -> None:
+    """Train this series in the background (once per set of figures)."""
+
+    global _worker
+    current = fingerprint(series)
+    with _lock:
+        if _failed.get(key, (None,))[0] == current:
+            return
+        if _queue.get(key, (None,))[0] == current:
+            return
+        _queue.pop(key, None)
+        _queue[key] = (current, frequency, dict(series))
+        if _worker is None:
+            _worker = threading.Thread(target=_work, name="cargo-throughput-training", daemon=True)
+            _worker.start()
+
+
+def wait_for(keys: dict[str, str], seconds: float) -> None:
+    """Wait until these series are trained, at most `seconds`."""
+
+    deadline = time.monotonic() + seconds
+    with _lock:
+        while any(_queue.get(k, (None,))[0] == fp for k, fp in keys.items()):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return
+            _queue_changed.wait(left)
+
+
+def failure_of(key: str, current: str) -> str | None:
+    with _lock:
+        hit = _failed.get(key)
+    return hit[1] if hit and hit[0] == current else None
+
+
 def ensure_trained(key: str, frequency: str, series: dict[int, float]):
     """
-    The saved test results and model of this series, training first when
-    the figures are not the ones it was trained on. Returns
-    (report, bundle, trained_now).
+    Train now (used by tests and scripts): (report, bundle, trained_now).
+    The page uses schedule() + cached() so it never waits for long.
     """
 
     current = fingerprint(series)
-    report, bundle = _load(key)
-    if report and report.get("fingerprint") == current:
-        return report, bundle, False
+    hit = cached(key, current)
+    if hit:
+        return hit[0], hit[1], False
+    report = train_monthly(series) if frequency == "monthly" else train_yearly(series)
+    bundle = report.pop("bundle", None)
+    _save(key, report, bundle)
     with _lock:
-        report, bundle = _load(key)
-        if report and report.get("fingerprint") == current:
-            return report, bundle, False
-        report = train_monthly(series) if frequency == "monthly" else train_yearly(series)
-        bundle = report.pop("bundle", None)
-        model_file, metrics_file = _paths(key)
-        MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        if bundle is not None:
-            _ml()[0].dump(bundle, model_file)
-        elif model_file.exists():
-            model_file.unlink()
-        metrics_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
-        return report, bundle, True
+        _memory[key] = (current, report, bundle)
+    return report, bundle, True
 
 
 # =========================================================
@@ -754,7 +856,7 @@ _REPORT_KEYS = (
 )
 
 
-def analyse(item: dict[str, Any]) -> dict[str, Any]:
+def analyse(item: dict[str, Any], started: frozenset = frozenset()) -> dict[str, Any]:
     frequency = "monthly" if item.get("frequency") == "monthly" else "yearly"
     series = to_series(item.get("points") or [], frequency)
     key = str(item.get("key") or item.get("name") or "series")
@@ -784,23 +886,26 @@ def analyse(item: dict[str, Any]) -> dict[str, Any]:
         ],
     )
 
-    model_error = None
+    current = fingerprint(series)
     report: dict[str, Any] = {}
     bundle = None
-    trained_now = False
+    model_error = failure_of(key, current)
+    training = False
     try:
-        report, bundle, trained_now = ensure_trained(key, frequency, series)
+        hit = cached(key, current)
     except MLPackagesMissing as exc:
-        model_error = str(exc)
-    except Exception as exc:  # never break the page because of one series
-        model_error = f"The model could not be trained ({type(exc).__name__})."
+        hit, model_error = None, str(exc)
+    if hit:
+        report, bundle = hit
+    elif model_error is None:
+        training = True
 
-    state = report.get("status") or "not_enough_data"
+    state = "training" if training else (report.get("status") or "not_enough_data")
     if state == "trained" and bundle is None:
         state = "not_better_than_baseline"
     result.update(
         state="ready" if state == "trained" else state,
-        trained_now=trained_now,
+        trained_now=(key in started and not training),
         model_error=model_error,
         model={k: report.get(k) for k in _REPORT_KEYS} if report.get("status") in (
             "trained", "not_better_than_baseline") else None,
@@ -819,8 +924,39 @@ def analyse(item: dict[str, Any]) -> dict[str, Any]:
 
 def analyse_all(items: list[dict[str, Any]]) -> dict[str, Any]:
     if not items:
-        return {"state": "no_data", "message": NO_DATA_MESSAGE, "series": []}
-    results = [analyse(item) for item in items]
+        return {"state": "no_data", "message": NO_DATA_MESSAGE, "series": [], "training": 0}
+
+    # Start the training of every series that is new or changed, wait a
+    # few seconds (small files finish in time), then answer with what is
+    # ready. The rest is answered with a simple estimate, marked
+    # "training", and the page asks again.
+    waiting: dict[str, str] = {}
+    for item in items:
+        frequency = "monthly" if item.get("frequency") == "monthly" else "yearly"
+        series = to_series(item.get("points") or [], frequency)
+        key = str(item.get("key") or item.get("name") or "series")
+        if not series:
+            continue
+        current = fingerprint(series)
+        try:
+            if cached(key, current) or failure_of(key, current):
+                continue
+        except MLPackagesMissing:
+            continue
+        if len(series) < (MIN_MONTHS if frequency == "monthly" else MIN_YEARS):
+            # Too short to train: answered at once, nothing to wait for.
+            try:
+                ensure_trained(key, frequency, series)
+            except Exception:
+                pass
+            continue
+        schedule(key, frequency, series)
+        waiting[key] = current
+    if waiting:
+        wait_for(waiting, WAIT_SECONDS)
+
+    results = [analyse(item, frozenset(waiting)) for item in items]
+    training = sum(1 for r in results if r["state"] == "training")
     if all(r["state"] == "no_data" for r in results):
-        return {"state": "no_data", "message": NO_DATA_MESSAGE, "series": results}
-    return {"state": "ok", "message": None, "series": results}
+        return {"state": "no_data", "message": NO_DATA_MESSAGE, "series": results, "training": 0}
+    return {"state": "ok", "message": None, "series": results, "training": training}
