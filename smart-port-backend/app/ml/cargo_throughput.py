@@ -718,7 +718,7 @@ _lock = threading.Lock()
 # The answer must not wait for training: a page request waits at most
 # this long, then the training carries on in the background and the page
 # asks again (Nginx and browsers give up on very long requests).
-WAIT_SECONDS = 8.0
+WAIT_SECONDS = 7.0
 
 # Reports and models already read, so a request does not open every file
 # again: key -> (fingerprint, report, bundle).
