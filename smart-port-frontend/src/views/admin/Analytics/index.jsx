@@ -2,7 +2,13 @@ import React from "react";
 
 import { Link } from "react-router-dom";
 
-import { MdAnalytics, MdHistory, MdRefresh, MdWarning } from "react-icons/md";
+import {
+  MdAnalytics,
+  MdHistory,
+  MdInsights,
+  MdRefresh,
+  MdWarning,
+} from "react-icons/md";
 
 import { apiGet } from "../../../services/api";
 
@@ -259,6 +265,19 @@ const Analytics = () => {
     to: null,
   });
 
+  // Dates picked in the Start / End boxes that are not analysed yet
+  // (null = the boxes show the analysed period). The figures change
+  // only when "Analyse" is pressed. A quick selection button
+  // analyses at once.
+  const [draft, setDraft] = React.useState(null);
+
+  // A short note under the Analyse button ("Showing ...").
+  const [analysedNote, setAnalysedNote] = React.useState("");
+
+  const resultsRef = React.useRef(null);
+
+  const noteTimerRef = React.useRef(null);
+
   const [traffic, setTraffic] = React.useState({
     status: "loading",
     data: null,
@@ -419,8 +438,6 @@ const Analytics = () => {
       return wanted.from === range.from && wanted.to === range.to;
     }) || null;
 
-  const dayCount = range.to - range.from + 1;
-
   const label = periodLabel(range, today);
 
   const grid = React.useMemo(
@@ -453,25 +470,90 @@ const Analytics = () => {
     loadTraffic(windowRef.current);
   }, [trafficDays.from, trafficDays.to, loadTraffic]);
 
-  const applyPreset = (name) =>
-    setSelection({ preset: name, from: null, to: null });
+  // The days shown in the Start / End boxes.
+  const pickedRange = draft || range;
 
-  const resetFilters = () =>
+  const pending =
+    draft !== null &&
+    (draft.from !== range.from || draft.to !== range.to);
+
+  const pickedDayCount = pickedRange.to - pickedRange.from + 1;
+
+  const pickedLabel = periodLabel(pickedRange, today);
+
+  const showNote = (text) => {
+    setAnalysedNote(text);
+
+    window.clearTimeout(noteTimerRef.current);
+
+    noteTimerRef.current = window.setTimeout(
+      () => setAnalysedNote(""),
+      5000
+    );
+  };
+
+  React.useEffect(
+    () => () => window.clearTimeout(noteTimerRef.current),
+    []
+  );
+
+  const scrollToResults = () => {
+    try {
+      resultsRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    } catch {
+      // Not important.
+    }
+  };
+
+  const applyPreset = (name) => {
+    setSelection({ preset: name, from: null, to: null });
+    setDraft(null);
+    showNote(
+      `Showing ${name.toLowerCase()}: ${periodLabel(
+        presetRange(name, today),
+        today
+      )}.`
+    );
+  };
+
+  const resetFilters = () => {
     setSelection({ preset: DEFAULT_PRESET, from: null, to: null });
+    setDraft(null);
+    setAnalysedNote("");
+  };
 
   const chooseFrom = (dayNumber) =>
-    setSelection({
-      preset: null,
+    setDraft({
       from: dayNumber,
-      to: Math.max(dayNumber, range.to),
+      to: Math.max(dayNumber, pickedRange.to),
     });
 
   const chooseTo = (dayNumber) =>
-    setSelection({
-      preset: null,
-      from: Math.min(range.from, dayNumber),
+    setDraft({
+      from: Math.min(pickedRange.from, dayNumber),
       to: dayNumber,
     });
+
+  // "Analyse": the figures below are worked out for the picked days,
+  // with freshly loaded records, and the page moves down to them.
+  const analyse = () => {
+    const chosen = pickedRange;
+
+    if (pending) {
+      setSelection({ preset: null, from: chosen.from, to: chosen.to });
+    }
+
+    setDraft(null);
+
+    refresh();
+
+    showNote(`Showing ${periodLabel(chosen, today)}.`);
+
+    window.setTimeout(scrollToResults, 150);
+  };
 
   // =======================================================
   // FIGURES
@@ -845,10 +927,10 @@ const Analytics = () => {
             <DatePicker
               testId="picker-from"
               label="Start Date"
-              value={range.from}
+              value={pickedRange.from}
               onChange={chooseFrom}
               minDay={EARLIEST_DAY}
-              maxDay={range.to}
+              maxDay={pickedRange.to}
               today={today}
               selectingLabel="SELECTING START DATE"
             />
@@ -856,9 +938,9 @@ const Analytics = () => {
             <DatePicker
               testId="picker-to"
               label="End Date"
-              value={range.to}
+              value={pickedRange.to}
               onChange={chooseTo}
-              minDay={range.from}
+              minDay={pickedRange.from}
               maxDay={today}
               today={today}
               selectingLabel="SELECTING END DATE"
@@ -877,18 +959,55 @@ const Analytics = () => {
                   data-testid="selected-period"
                   className="mt-2 text-2xl font-bold text-navy-700 dark:text-white"
                 >
-                  {label}
+                  {pickedLabel}
                 </p>
+
+                <span
+                  data-testid="selected-days"
+                  className="mt-3 inline-block w-fit rounded-full bg-lightPrimary px-4 py-1.5 text-xs font-bold text-brand-500 dark:bg-navy-700"
+                >
+                  {pickedDayCount === 1
+                    ? "1 day"
+                    : `${fmt(pickedDayCount)} days`}{" "}
+                  · Singapore time
+                </span>
               </div>
 
-              <span
-                data-testid="selected-days"
-                className="w-fit rounded-full bg-lightPrimary px-5 py-3 text-sm font-bold text-brand-500 dark:bg-navy-700"
-              >
-                {dayCount === 1 ? "1 day" : `${fmt(dayCount)} days`} ·
-                Singapore time
-              </span>
+              <div className="flex flex-col items-stretch gap-2 md:items-end">
+                <button
+                  type="button"
+                  data-testid="analyse-button"
+                  onClick={analyse}
+                  disabled={refreshing}
+                  className={`flex items-center justify-center gap-2 rounded-xl px-7 py-3.5 text-sm font-bold text-white shadow-sm transition disabled:cursor-wait disabled:opacity-70 ${
+                    pending
+                      ? "animate-pulse bg-brand-500 hover:bg-brand-600"
+                      : "bg-brand-500 hover:bg-brand-600"
+                  }`}
+                >
+                  {refreshing ? (
+                    <MdRefresh className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <MdInsights className="h-5 w-5" />
+                  )}
+                  {refreshing ? "Analysing…" : "Analyse"}
+                </button>
+              </div>
             </div>
+
+            <p
+              data-testid="analyse-status"
+              role="status"
+              className={`mt-4 text-sm font-medium ${
+                pending
+                  ? "text-amber-600 dark:text-amber-300"
+                  : "text-green-600 dark:text-green-400"
+              }`}
+            >
+              {pending
+                ? `New dates picked. Press Analyse to see the figures for them. The figures below still show ${label}.`
+                : analysedNote || `The figures below show ${label}.`}
+            </p>
           </div>
         </div>
       </div>
@@ -896,6 +1015,8 @@ const Analytics = () => {
       {/* =====================================================
           THE SELECTED PERIOD AT A GLANCE
           ===================================================== */}
+
+      <div ref={resultsRef} className="scroll-mt-24" />
 
       <SectionTitle note={label}>Selected period at a glance</SectionTitle>
 
