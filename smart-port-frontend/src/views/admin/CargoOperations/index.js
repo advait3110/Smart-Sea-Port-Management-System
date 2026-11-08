@@ -7,6 +7,7 @@ import {
   MdSearch,
   MdRefresh,
   MdTrendingUp,
+  MdDirectionsBoat,
   MdUploadFile,
   MdCheckCircle,
   MdErrorOutline,
@@ -15,6 +16,9 @@ import {
 // Yearly, monthly and shipping statistics (second tab). The file sits in
 // this same folder, next to portData.js.
 import CargoThroughput from "./ThroughputTab";
+
+// Containers in TEU (third tab), from the same imported files.
+import ContainerThroughput from "./ContainerTab";
 
 import {
   DATASETS,
@@ -770,9 +774,12 @@ const OperationsTab = ({ data }) => {
 // =========================================================
 // CARGO OPERATIONS
 //
-// One module, two tabs:
+// One module, three tabs:
 //   1. Cargo Operations: cargo by type, imports and exports.
-//   2. Cargo Throughput: yearly, monthly and shipping statistics.
+//   2. Cargo Throughput: yearly, monthly and shipping statistics
+//      (weight of all goods, in tonnes).
+//   3. Container Throughput: containers handled, in TEU (MPA
+//      "Container Throughput, Monthly").
 //
 // The Import CSV button is shared: it reads any of the five files, so a
 // file can never be imported into the "wrong" tab.
@@ -789,10 +796,20 @@ const TABS = [
     label: "Cargo Throughput",
     icon: <MdTrendingUp className="h-5 w-5" />,
   },
+  {
+    key: "containers",
+    label: "Container Throughput",
+    icon: <MdDirectionsBoat className="h-5 w-5" />,
+  },
 ];
 
 // The tab that shows what was just imported (null: stay where you are).
 const tabFor = (kinds) => {
+  // Only the container file: show the Container Throughput tab.
+  if (kinds.length > 0 && kinds.every((kind) => kind === "containerMonthly")) {
+    return "containers";
+  }
+
   const operations = kinds.includes("trade");
 
   const throughput = kinds.some((kind) =>
@@ -1024,6 +1041,8 @@ const CargoOperations = () => {
       >
         {activeTab === "operations" ? (
           <OperationsTab data={data} />
+        ) : activeTab === "containers" ? (
+          <ContainerThroughput data={data} />
         ) : (
           <CargoThroughput
             data={data}

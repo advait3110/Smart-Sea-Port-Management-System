@@ -1489,3 +1489,16 @@ const CargoThroughput = ({ data, helpers }) => {
 };
 
 export default CargoThroughput;
+
+// Shared with the Container Throughput tab (ContainerTab.jsx).
+export {
+  MonthlyContainerChart,
+  TrendChart,
+  KpiCard,
+  ChartCard,
+  formatNumber,
+  formatMillions,
+  formatPercent,
+  changePercent,
+  monthLabel,
+};
