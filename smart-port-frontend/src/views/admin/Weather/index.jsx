@@ -49,6 +49,50 @@ const LOCATION_MISMATCH_DEGREES = 0.5;
    tab is visible. */
 const AUTO_REFRESH_MS = 10 * 60 * 1000;
 
+/* =========================================================
+   FAST START (slow networks)
+
+   The last answer of GET /weather is kept in this browser, so the
+   next visit shows it at once while the latest weather loads.
+   Only shown when it is at most WEATHER_CACHE_MAX_AGE_MS old.
+   ========================================================= */
+
+const WEATHER_CACHE_KEY = "singaporePortWeather";
+
+const WEATHER_CACHE_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+
+const readWeatherCache = () => {
+  try {
+    const saved = JSON.parse(
+      window.localStorage.getItem(WEATHER_CACHE_KEY) || "null"
+    );
+
+    if (
+      !saved ||
+      !saved.response ||
+      !Number.isFinite(saved.savedAt) ||
+      Date.now() - saved.savedAt > WEATHER_CACHE_MAX_AGE_MS
+    ) {
+      return null;
+    }
+
+    return saved;
+  } catch {
+    return null;
+  }
+};
+
+const saveWeatherCache = (response) => {
+  try {
+    window.localStorage.setItem(
+      WEATHER_CACHE_KEY,
+      JSON.stringify({ savedAt: Date.now(), response })
+    );
+  } catch {
+    /* Storage full or blocked: the page works without it. */
+  }
+};
+
 /* If the newest observation is older than this, warn that the
    data may be stale. */
 const STALE_AFTER_MINUTES = 45;
@@ -577,6 +621,10 @@ const Weather = () => {
   /* When this page last received data from the backend. */
   const [fetchedAt, setFetchedAt] = React.useState(null);
 
+  /* Set (to the time it was fetched) while the weather saved at the
+     last visit is on screen and the latest is still loading. */
+  const [showingSaved, setShowingSaved] = React.useState(null);
+
   /* Ignores answers from older requests that finish late. */
   const requestIdRef = React.useRef(0);
 
@@ -610,6 +658,241 @@ const Weather = () => {
      LOAD WEATHER DATA FROM BACKEND
      ======================================================= */
 
+  /* Puts one answer of GET /weather on the screen (also used for
+     the weather saved from the last visit, see FAST START). */
+  const applyWeatherResponse = React.useCallback((response) => {
+    if (!response) {
+      throw new Error("Weather service returned an empty response.");
+    }
+
+    const weatherData = response.weather || {};
+
+    const marineData = response.marine || {};
+
+    const weatherCurrent = weatherData.current || {};
+
+    const marineCurrent = marineData.current || {};
+
+    const utcOffsetSeconds = weatherData.utc_offset_seconds;
+
+    const warnings = [];
+
+    /* ==================================================
+       LOCATION CHECK (weather and marine)
+
+       Open-Meteo reports the coordinates it used. If they
+       are present and far from Singapore, the backend is
+       still querying another location.
+       ================================================== */
+
+    const checkLocation = (label, data) => {
+      const latitude = isNumber(data.latitude)
+        ? Number(data.latitude)
+        : null;
+
+      const longitude = isNumber(data.longitude)
+        ? Number(data.longitude)
+        : null;
+
+      if (latitude === null || longitude === null) {
+        return;
+      }
+
+      if (
+        Math.abs(latitude - SINGAPORE_PORT.latitude) >
+          LOCATION_MISMATCH_DEGREES ||
+        Math.abs(longitude - SINGAPORE_PORT.longitude) >
+          LOCATION_MISMATCH_DEGREES
+      ) {
+        warnings.push(
+          `The backend returned ${label} data for ${latitude.toFixed(
+            2
+          )}, ${longitude.toFixed(2)}, not ${
+            SINGAPORE_PORT.name
+          }. Update the coordinates in the FastAPI /weather route.`
+        );
+      }
+    };
+
+    checkLocation("weather", weatherData);
+
+    checkLocation("marine", marineData);
+
+    /* ==================================================
+       TIMEZONE CHECK
+
+       Times on this page are converted correctly either way,
+       but daily forecast days are cut at midnight in the
+       timezone the backend requested.
+       ================================================== */
+
+    if (
+      weatherData.timezone &&
+      weatherData.timezone !== PORT_TIME_ZONE
+    ) {
+      warnings.push(
+        `The weather data uses the timezone "${weatherData.timezone}", not ${PORT_TIME_ZONE}. Daily forecast days may not match Singapore days. Set timezone=${PORT_TIME_ZONE} in the backend request.`
+      );
+    }
+
+    /* ==================================================
+       CURRENT WEATHER
+       ================================================== */
+
+    const observedAt = parseApiTime(
+      weatherCurrent.time,
+      utcOffsetSeconds
+    );
+
+    if (observedAt) {
+      const ageMinutes = Math.round(
+        (Date.now() - observedAt.getTime()) / 60000
+      );
+
+      if (ageMinutes > STALE_AFTER_MINUTES) {
+        warnings.push(
+          `The newest weather observation is ${ageMinutes} minutes old, so the values below may be out of date.`
+        );
+      }
+    }
+
+    setCurrentWeather({
+      location: response.location?.name || SINGAPORE_PORT.name,
+
+      temperature: weatherCurrent.temperature_2m ?? null,
+
+      feelsLike: weatherCurrent.apparent_temperature ?? null,
+
+      weatherCode: isNumber(weatherCurrent.weather_code)
+        ? Number(weatherCurrent.weather_code)
+        : null,
+
+      condition: isNumber(weatherCurrent.weather_code)
+        ? getWeatherCondition(Number(weatherCurrent.weather_code))
+        : "Conditions unavailable",
+
+      humidity: weatherCurrent.relative_humidity_2m ?? null,
+
+      windSpeed: weatherCurrent.wind_speed_10m ?? null,
+
+      windDirectionDegrees: weatherCurrent.wind_direction_10m ?? null,
+
+      /* Open-Meteo sends visibility in metres. */
+      visibility: isNumber(weatherCurrent.visibility)
+        ? Number(weatherCurrent.visibility) / 1000
+        : null,
+
+      pressure: weatherCurrent.pressure_msl ?? null,
+
+      precipitation: weatherCurrent.precipitation ?? null,
+
+      observedAt,
+    });
+
+    /* ==================================================
+       HOURLY WEATHER (next 6 hours, including this hour)
+       ================================================== */
+
+    const weatherTimes = weatherData.hourly?.time || [];
+
+    const hourlyTemperature = weatherData.hourly?.temperature_2m || [];
+
+    const hourlyRain =
+      weatherData.hourly?.precipitation_probability || [];
+
+    const hourlyWind = weatherData.hourly?.wind_speed_10m || [];
+
+    const hourlyWindDirection =
+      weatherData.hourly?.wind_direction_10m || [];
+
+    const hourStart = Date.now() - 60 * 60 * 1000;
+
+    const formattedHourly = weatherTimes
+      .map((time, index) => ({
+        time,
+
+        instant: parseApiTime(time, utcOffsetSeconds),
+
+        temperature: hourlyTemperature[index] ?? null,
+
+        rain: hourlyRain[index] ?? null,
+
+        wind: hourlyWind[index] ?? null,
+
+        windDirection: hourlyWindDirection[index] ?? null,
+      }))
+      .filter(
+        (item) =>
+          item.instant !== null && item.instant.getTime() > hourStart
+      )
+      .slice(0, 6);
+
+    setHourlyWeather(formattedHourly);
+
+    /* ==================================================
+       7-DAY FORECAST
+       ================================================== */
+
+    const dailyTimes = weatherData.daily?.time || [];
+
+    const dailyCodes = weatherData.daily?.weather_code || [];
+
+    const dailyMax = weatherData.daily?.temperature_2m_max || [];
+
+    const dailyMin = weatherData.daily?.temperature_2m_min || [];
+
+    const dailyRain =
+      weatherData.daily?.precipitation_probability_max || [];
+
+    const formattedForecast = dailyTimes.map((date, index) => ({
+      date,
+
+      day: getForecastDayLabel(date),
+
+      condition: isNumber(dailyCodes[index])
+        ? getWeatherCondition(Number(dailyCodes[index]))
+        : "Conditions unavailable",
+
+      temperature: dailyMax[index] ?? null,
+
+      low: dailyMin[index] ?? null,
+
+      rain: dailyRain[index] ?? null,
+    }));
+
+    setForecastData(formattedForecast);
+
+    /* ==================================================
+       MARINE DATA
+       ================================================== */
+
+    setMarineConditions({
+      waveHeight: marineCurrent.wave_height ?? null,
+
+      waveDirection: marineCurrent.wave_direction ?? null,
+
+      wavePeriod: marineCurrent.wave_period ?? null,
+
+      swellHeight: marineCurrent.swell_wave_height ?? null,
+
+      swellDirection: marineCurrent.swell_wave_direction ?? null,
+
+      swellPeriod: marineCurrent.swell_wave_period ?? null,
+
+      seaSurfaceTemperature:
+        marineCurrent.sea_surface_temperature ?? null,
+
+      oceanCurrentVelocity: marineCurrent.ocean_current_velocity ?? null,
+
+      oceanCurrentDirection:
+        marineCurrent.ocean_current_direction ?? null,
+
+      seaLevelHeight: marineCurrent.sea_level_height_msl ?? null,
+    });
+
+    setDataWarnings(warnings);
+  }, []);
+
   const loadWeatherData = React.useCallback(async () => {
     requestIdRef.current += 1;
 
@@ -627,236 +910,11 @@ const Weather = () => {
         return;
       }
 
-      if (!response) {
-        throw new Error("Weather service returned an empty response.");
-      }
+      applyWeatherResponse(response);
 
-      const weatherData = response.weather || {};
+      saveWeatherCache(response);
 
-      const marineData = response.marine || {};
-
-      const weatherCurrent = weatherData.current || {};
-
-      const marineCurrent = marineData.current || {};
-
-      const utcOffsetSeconds = weatherData.utc_offset_seconds;
-
-      const warnings = [];
-
-      /* ==================================================
-         LOCATION CHECK (weather and marine)
-
-         Open-Meteo reports the coordinates it used. If they
-         are present and far from Singapore, the backend is
-         still querying another location.
-         ================================================== */
-
-      const checkLocation = (label, data) => {
-        const latitude = isNumber(data.latitude)
-          ? Number(data.latitude)
-          : null;
-
-        const longitude = isNumber(data.longitude)
-          ? Number(data.longitude)
-          : null;
-
-        if (latitude === null || longitude === null) {
-          return;
-        }
-
-        if (
-          Math.abs(latitude - SINGAPORE_PORT.latitude) >
-            LOCATION_MISMATCH_DEGREES ||
-          Math.abs(longitude - SINGAPORE_PORT.longitude) >
-            LOCATION_MISMATCH_DEGREES
-        ) {
-          warnings.push(
-            `The backend returned ${label} data for ${latitude.toFixed(
-              2
-            )}, ${longitude.toFixed(2)}, not ${
-              SINGAPORE_PORT.name
-            }. Update the coordinates in the FastAPI /weather route.`
-          );
-        }
-      };
-
-      checkLocation("weather", weatherData);
-
-      checkLocation("marine", marineData);
-
-      /* ==================================================
-         TIMEZONE CHECK
-
-         Times on this page are converted correctly either way,
-         but daily forecast days are cut at midnight in the
-         timezone the backend requested.
-         ================================================== */
-
-      if (
-        weatherData.timezone &&
-        weatherData.timezone !== PORT_TIME_ZONE
-      ) {
-        warnings.push(
-          `The weather data uses the timezone "${weatherData.timezone}", not ${PORT_TIME_ZONE}. Daily forecast days may not match Singapore days. Set timezone=${PORT_TIME_ZONE} in the backend request.`
-        );
-      }
-
-      /* ==================================================
-         CURRENT WEATHER
-         ================================================== */
-
-      const observedAt = parseApiTime(
-        weatherCurrent.time,
-        utcOffsetSeconds
-      );
-
-      if (observedAt) {
-        const ageMinutes = Math.round(
-          (Date.now() - observedAt.getTime()) / 60000
-        );
-
-        if (ageMinutes > STALE_AFTER_MINUTES) {
-          warnings.push(
-            `The newest weather observation is ${ageMinutes} minutes old, so the values below may be out of date.`
-          );
-        }
-      }
-
-      setCurrentWeather({
-        location: response.location?.name || SINGAPORE_PORT.name,
-
-        temperature: weatherCurrent.temperature_2m ?? null,
-
-        feelsLike: weatherCurrent.apparent_temperature ?? null,
-
-        weatherCode: isNumber(weatherCurrent.weather_code)
-          ? Number(weatherCurrent.weather_code)
-          : null,
-
-        condition: isNumber(weatherCurrent.weather_code)
-          ? getWeatherCondition(Number(weatherCurrent.weather_code))
-          : "Conditions unavailable",
-
-        humidity: weatherCurrent.relative_humidity_2m ?? null,
-
-        windSpeed: weatherCurrent.wind_speed_10m ?? null,
-
-        windDirectionDegrees: weatherCurrent.wind_direction_10m ?? null,
-
-        /* Open-Meteo sends visibility in metres. */
-        visibility: isNumber(weatherCurrent.visibility)
-          ? Number(weatherCurrent.visibility) / 1000
-          : null,
-
-        pressure: weatherCurrent.pressure_msl ?? null,
-
-        precipitation: weatherCurrent.precipitation ?? null,
-
-        observedAt,
-      });
-
-      /* ==================================================
-         HOURLY WEATHER (next 6 hours, including this hour)
-         ================================================== */
-
-      const weatherTimes = weatherData.hourly?.time || [];
-
-      const hourlyTemperature = weatherData.hourly?.temperature_2m || [];
-
-      const hourlyRain =
-        weatherData.hourly?.precipitation_probability || [];
-
-      const hourlyWind = weatherData.hourly?.wind_speed_10m || [];
-
-      const hourlyWindDirection =
-        weatherData.hourly?.wind_direction_10m || [];
-
-      const hourStart = Date.now() - 60 * 60 * 1000;
-
-      const formattedHourly = weatherTimes
-        .map((time, index) => ({
-          time,
-
-          instant: parseApiTime(time, utcOffsetSeconds),
-
-          temperature: hourlyTemperature[index] ?? null,
-
-          rain: hourlyRain[index] ?? null,
-
-          wind: hourlyWind[index] ?? null,
-
-          windDirection: hourlyWindDirection[index] ?? null,
-        }))
-        .filter(
-          (item) =>
-            item.instant !== null && item.instant.getTime() > hourStart
-        )
-        .slice(0, 6);
-
-      setHourlyWeather(formattedHourly);
-
-      /* ==================================================
-         7-DAY FORECAST
-         ================================================== */
-
-      const dailyTimes = weatherData.daily?.time || [];
-
-      const dailyCodes = weatherData.daily?.weather_code || [];
-
-      const dailyMax = weatherData.daily?.temperature_2m_max || [];
-
-      const dailyMin = weatherData.daily?.temperature_2m_min || [];
-
-      const dailyRain =
-        weatherData.daily?.precipitation_probability_max || [];
-
-      const formattedForecast = dailyTimes.map((date, index) => ({
-        date,
-
-        day: getForecastDayLabel(date),
-
-        condition: isNumber(dailyCodes[index])
-          ? getWeatherCondition(Number(dailyCodes[index]))
-          : "Conditions unavailable",
-
-        temperature: dailyMax[index] ?? null,
-
-        low: dailyMin[index] ?? null,
-
-        rain: dailyRain[index] ?? null,
-      }));
-
-      setForecastData(formattedForecast);
-
-      /* ==================================================
-         MARINE DATA
-         ================================================== */
-
-      setMarineConditions({
-        waveHeight: marineCurrent.wave_height ?? null,
-
-        waveDirection: marineCurrent.wave_direction ?? null,
-
-        wavePeriod: marineCurrent.wave_period ?? null,
-
-        swellHeight: marineCurrent.swell_wave_height ?? null,
-
-        swellDirection: marineCurrent.swell_wave_direction ?? null,
-
-        swellPeriod: marineCurrent.swell_wave_period ?? null,
-
-        seaSurfaceTemperature:
-          marineCurrent.sea_surface_temperature ?? null,
-
-        oceanCurrentVelocity: marineCurrent.ocean_current_velocity ?? null,
-
-        oceanCurrentDirection:
-          marineCurrent.ocean_current_direction ?? null,
-
-        seaLevelHeight: marineCurrent.sea_level_height_msl ?? null,
-      });
-
-      setDataWarnings(warnings);
+      setShowingSaved(null);
 
       setFetchedAt(new Date());
     } catch (fetchError) {
@@ -875,15 +933,34 @@ const Weather = () => {
         setIsLoading(false);
       }
     }
-  }, []);
+  }, [applyWeatherResponse]);
 
   /* =======================================================
      INITIAL LOAD
+
+     Fast start: the weather saved at the last visit (real
+     Open-Meteo data, at most WEATHER_CACHE_MAX_AGE_MS old) is
+     shown at once, with a note saying when it was fetched, while
+     the latest weather loads.
      ======================================================= */
 
   React.useEffect(() => {
+    const saved = readWeatherCache();
+
+    if (saved) {
+      try {
+        applyWeatherResponse(saved.response);
+
+        setFetchedAt(new Date(saved.savedAt));
+
+        setShowingSaved(new Date(saved.savedAt));
+      } catch {
+        // A saved copy that cannot be shown is simply skipped.
+      }
+    }
+
     loadWeatherData();
-  }, [loadWeatherData]);
+  }, [applyWeatherResponse, loadWeatherData]);
 
   /* =======================================================
      AUTO REFRESH (only while the tab is visible)
@@ -1183,7 +1260,11 @@ const Weather = () => {
               </p>
 
               <p className="mt-2 text-xs text-gray-400">
-                {isLoading
+                {showingSaved && isLoading
+                  ? `Saved copy from ${formatPortTime(
+                      showingSaved
+                    )}, updating...`
+                  : isLoading
                   ? "Retrieving data..."
                   : fetchedAt
                   ? `Fetched ${formatPortTime(fetchedAt)}`

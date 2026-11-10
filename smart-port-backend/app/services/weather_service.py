@@ -1,5 +1,7 @@
 import asyncio
+import copy
 import logging
+import time
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
@@ -42,6 +44,42 @@ ARCHIVE_API_URL = (
 
 
 REQUEST_TIMEOUT = 20.0
+
+
+# =========================================================
+# SAVED ANSWERS (fast pages, even when Open-Meteo is slow)
+# =========================================================
+#
+# Open-Meteo updates its current weather about every 15 minutes, so
+# there is no point asking it on every page load. The last good answer
+# is kept in memory:
+#
+# - younger than LIVE_FRESH_SECONDS: returned at once, Open-Meteo is
+#   not asked at all (the page answers in milliseconds);
+# - older: Open-Meteo is asked again; if it is slow, busy (503) or
+#   unreachable, the last good answer (up to LIVE_KEEP_SECONDS old) is
+#   returned instead, marked "stale", so the page still shows real,
+#   recent weather instead of an error.
+#
+# When several pages ask at the same moment, only ONE request goes to
+# Open-Meteo; the others wait for that answer.
+#
+# Past days (history) never change, so each answered date range is
+# kept for HISTORY_KEEP_SECONDS (the newest HISTORY_CACHE_SIZE ranges).
+
+LIVE_FRESH_SECONDS = 5 * 60
+
+LIVE_KEEP_SECONDS = 6 * 60 * 60
+
+HISTORY_KEEP_SECONDS = 6 * 60 * 60
+
+HISTORY_CACHE_SIZE = 40
+
+_live_saved: dict | None = None
+_live_saved_at = 0.0
+_live_lock = asyncio.Lock()
+
+_history_saved: dict = {}
 
 
 # History limits. Keep MAX_HISTORY_DAYS in sync with the
@@ -283,7 +321,71 @@ async def fetch_marine_data(
 
 async def get_weather_data():
     """
-    Retrieve current weather, hourly forecast,
+    Current weather, hourly and daily forecast and marine conditions
+    for Port of Singapore, from the saved answer when it is recent
+    (see SAVED ANSWERS above).
+    """
+
+    global _live_saved, _live_saved_at
+
+    if (
+        _live_saved is not None
+        and time.monotonic() - _live_saved_at < LIVE_FRESH_SECONDS
+    ):
+        return _with_age(_live_saved, _live_saved_at, stale=False)
+
+    async with _live_lock:
+        # Another request may have refreshed it while this one waited.
+        if (
+            _live_saved is not None
+            and time.monotonic() - _live_saved_at < LIVE_FRESH_SECONDS
+        ):
+            return _with_age(_live_saved, _live_saved_at, stale=False)
+
+        try:
+            fresh = await _download_weather_data()
+
+        except WeatherProviderError as exc:
+            if (
+                _live_saved is not None
+                and time.monotonic() - _live_saved_at < LIVE_KEEP_SECONDS
+            ):
+                logger.warning(
+                    "Open-Meteo failed (%s); returning the saved "
+                    "weather instead.",
+                    exc,
+                )
+
+                result = _with_age(_live_saved, _live_saved_at, stale=True)
+
+                result["provider_error"] = str(exc)
+
+                return result
+
+            raise
+
+        _live_saved = fresh
+        _live_saved_at = time.monotonic()
+
+        return _with_age(fresh, _live_saved_at, stale=False)
+
+
+def _with_age(saved: dict, saved_at: float, stale: bool) -> dict:
+    """A copy of a saved answer, telling how old it is."""
+
+    result = copy.deepcopy(saved)
+
+    result["cached"] = {
+        "age_seconds": int(max(0, time.monotonic() - saved_at)),
+        "stale": stale,
+    }
+
+    return result
+
+
+async def _download_weather_data():
+    """
+    Ask Open-Meteo for current weather, hourly forecast,
     daily forecast and marine conditions for Port of Singapore.
     """
 
@@ -558,6 +660,35 @@ async def get_weather_history(
     """
 
     validate_history_range(start_date, end_date)
+
+    # Past days never change: answer from the saved copy when there is one.
+    key = (start_date.isoformat(), end_date.isoformat())
+
+    saved = _history_saved.get(key)
+
+    if saved and time.monotonic() - saved[0] < HISTORY_KEEP_SECONDS:
+        return copy.deepcopy(saved[1])
+
+    result = await _download_weather_history(start_date, end_date)
+
+    # Only days that are fully over are kept (today can still change).
+    today = datetime.now(PORT_UTC_OFFSET).date()
+
+    if end_date < today and not result.get("marine_error"):
+        _history_saved[key] = (time.monotonic(), result)
+
+        while len(_history_saved) > HISTORY_CACHE_SIZE:
+            oldest = min(_history_saved, key=lambda k: _history_saved[k][0])
+            _history_saved.pop(oldest, None)
+
+    return copy.deepcopy(result)
+
+
+async def _download_weather_history(
+    start_date: date,
+    end_date: date,
+):
+    """Ask Open-Meteo for the history of start_date..end_date."""
 
     timeout = httpx.Timeout(
         REQUEST_TIMEOUT,
