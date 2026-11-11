@@ -1127,7 +1127,13 @@ const AttachmentView = ({ attachment, mine, localUrl, onOpenImage }) => {
           data-testid="chat-image"
           className="block rounded-xl object-cover"
           style={{
-            maxWidth: "min(300px, 100%)",
+            // A fixed width (like WhatsApp), so the message bubble is
+            // exactly as wide as the picture, with no empty space next
+            // to it. Very tall pictures are trimmed to 300 px high here;
+            // the full picture opens when it is clicked.
+            width: "300px",
+            maxWidth: "100%",
+            height: "auto",
             maxHeight: "300px",
           }}
         />
