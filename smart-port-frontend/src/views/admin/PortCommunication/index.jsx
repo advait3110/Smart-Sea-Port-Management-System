@@ -1124,7 +1124,12 @@ const AttachmentView = ({ attachment, mine, localUrl, onOpenImage }) => {
         <img
           src={previewUrl}
           alt={attachment.name}
-          className="max-h-64 max-w-full rounded-xl object-cover"
+          data-testid="chat-image"
+          className="block rounded-xl object-cover"
+          style={{
+            maxWidth: "min(300px, 100%)",
+            maxHeight: "300px",
+          }}
         />
       </button>
     );
@@ -4646,42 +4651,74 @@ const PortCommunication = () => {
 
       {/* IMAGE VIEWER */}
 
+      {/* Drawn straight in <body> (like the menus), so the page frame
+          and the top bar can never cut it or cover it: the picture
+          always fits the whole window. Esc, the X or a click on the
+          dark area closes it. */}
+
       {lightbox && (
-        <div
-          className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/80 p-4"
-          onClick={() => setLightbox(null)}
-          data-testid="lightbox"
-        >
-          <div className="absolute right-4 top-4 flex gap-2">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                downloadAttachment(lightbox.attachment).catch(() => {});
+        <BodyPortal anchor={rootRef}>
+          <div
+            className="fixed inset-0 z-[3200] flex flex-col items-center justify-center p-4"
+            style={{ backgroundColor: "rgba(0, 0, 0, 0.88)" }}
+            onClick={() => setLightbox(null)}
+            data-testid="lightbox"
+            role="dialog"
+            aria-modal="true"
+            aria-label={lightbox.attachment.name}
+          >
+            <div
+              className="flex items-center justify-between gap-3 px-4 py-3"
+              style={{ position: "absolute", top: 0, left: 0, right: 0 }}
+            >
+              <p
+                className="min-w-0 truncate text-sm font-semibold text-white/90"
+                title={lightbox.attachment.name}
+              >
+                {lightbox.attachment.name}
+              </p>
+
+              <div className="flex flex-shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    downloadAttachment(lightbox.attachment).catch(() => {});
+                  }}
+                  aria-label="Download image"
+                  title="Download"
+                  className="rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
+                >
+                  <MdFileDownload className="h-6 w-6" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLightbox(null)}
+                  aria-label="Close"
+                  title="Close (Esc)"
+                  className="rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
+                >
+                  <MdClose className="h-6 w-6" />
+                </button>
+              </div>
+            </div>
+
+            <img
+              src={lightbox.url}
+              alt={lightbox.attachment.name}
+              data-testid="lightbox-image"
+              onClick={(event) => event.stopPropagation()}
+              className="rounded-lg object-contain shadow-2xl"
+              style={{
+                maxWidth: "92vw",
+                maxHeight: "calc(100vh - 140px)",
+                width: "auto",
+                height: "auto",
               }}
-              aria-label="Download image"
-              className="rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
-            >
-              <MdFileDownload className="h-6 w-6" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setLightbox(null)}
-              aria-label="Close"
-              className="rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
-            >
-              <MdClose className="h-6 w-6" />
-            </button>
+            />
           </div>
-
-          <img
-            src={lightbox.url}
-            alt={lightbox.attachment.name}
-            onClick={(event) => event.stopPropagation()}
-            className="max-h-full max-w-full rounded-lg object-contain"
-          />
-        </div>
+        </BodyPortal>
       )}
     </div>
   );
