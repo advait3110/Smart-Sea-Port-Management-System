@@ -29,7 +29,6 @@ export const INCIDENT_LIMIT = 1000;
 export const SOURCES = [
   { key: "vessels", path: "/vessels" },
   { key: "berths", path: "/berths" },
-  { key: "cargo", path: "/cargo" },
   { key: "container", path: "/throughput?metric=container" },
   { key: "cargoYears", path: "/throughput?metric=cargo" },
   { key: "trucks", path: `/trucks?limit=${TRUCK_LIMIT}` },
@@ -40,7 +39,6 @@ export const SOURCES = [
 export const SOURCE_NAMES = {
   vessels: "Vessels",
   berths: "Berths",
-  cargo: "Cargo records",
   container: "Container throughput",
   cargoYears: "Cargo throughput",
   trucks: "Gate records",
@@ -1645,13 +1643,7 @@ export const busiestTerminal = (berths) => {
 // out from real records (the formula is written in "detail"). A score
 // that cannot be worked out (no records, or not allowed) is null and
 // the radar leaves it out instead of drawing a made-up zero.
-export const makeScores = ({ berths, cargo, trucks, incidents, shipTotal, shipFresh, why }) => {
-  const cargoDone = sum(
-    cargo.statuses
-      .filter((entry) => entry.key === "arrived" || entry.key === "delivered")
-      .map((entry) => entry.value)
-  );
-
+export const makeScores = ({ berths, trucks, incidents, shipTotal, shipFresh, why }) => {
   const share = (part, whole) => (whole > 0 ? percent(part, whole) : null);
 
   const pick = (key, label, value, detail, empty) => ({
@@ -1668,13 +1660,6 @@ export const makeScores = ({ berths, cargo, trucks, incidents, shipTotal, shipFr
       share(berths.status.occupied, berths.total),
       `${fmt(berths.status.occupied)} of ${fmt(berths.total)} active berths are occupied right now.`,
       "No berths are on record."
-    ),
-    pick(
-      "cargo",
-      "Cargo progress",
-      share(cargoDone, cargo.addedTotal),
-      `${fmt(cargoDone)} of ${fmt(cargo.addedTotal)} cargo records added in this period have arrived or been delivered.`,
-      "No cargo records were added in this period."
     ),
     pick(
       "gate",

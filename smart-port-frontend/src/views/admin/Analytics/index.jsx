@@ -49,7 +49,6 @@ import {
   analyseBerths,
   analyseTrucks,
   analyseIncidents,
-  analyseCargo,
   analyseEquipment,
   analyseContainers,
   analyseCargoYears,
@@ -93,7 +92,6 @@ import {
 // drawing made-up numbers.
 //
 //   GET /vessels, /berths          ships and berths right now
-//   GET /cargo                     cargo records
 //   GET /trucks?limit=1000         gate entries and exits
 //   GET /incidents                 the incident register
 //   GET /assets                    equipment and maintenance jobs
@@ -584,11 +582,6 @@ const Analytics = () => {
     [sources.incidents.data, range, grid]
   );
 
-  const cargo = React.useMemo(
-    () => analyseCargo(asList(sources.cargo.data), range, grid),
-    [sources.cargo.data, range, grid]
-  );
-
   const equipment = React.useMemo(
     () => analyseEquipment(sources.assets.data, range),
     [sources.assets.data, range]
@@ -651,20 +644,16 @@ const Analytics = () => {
 
   const incidentState = sources.incidents;
 
-  const cargoState = sources.cargo;
-
   const whyMissing = (state) => (isReady(state) ? "" : missing(state));
 
   const scores = makeScores({
     berths,
-    cargo,
     trucks,
     incidents,
     shipTotal: ships.total,
     shipFresh,
     why: {
       berth: whyMissing(sources.berths),
-      cargo: whyMissing(cargoState),
       gate: whyMissing(gateSource),
       ships: whyMissing(sources.vessels),
       safety: whyMissing(incidentState),
@@ -714,15 +703,6 @@ const Analytics = () => {
     title: `${pad(hour)}:00 – ${pad(hour)}:59`,
   }));
 
-  const cargoAddedSeries = [
-    {
-      key: "added",
-      name: "Cargo records added",
-      color: "var(--an-s1)",
-      values: cargo.added,
-    },
-  ];
-
   const containerBuckets = containers.items.map((item) => ({
     label: item.label,
     sub: item.sub,
@@ -743,20 +723,6 @@ const Analytics = () => {
     sub: "",
     title: String(year),
   }));
-
-  const importExport = cargo.operation;
-
-  const byTonnes =
-    importExport.Import.weighed > 0 && importExport.Export.weighed > 0;
-
-  const ratioBase = byTonnes
-    ? [importExport.Import.tonnes, importExport.Export.tonnes]
-    : [importExport.Import.records, importExport.Export.records];
-
-  const ratioText =
-    ratioBase[0] > 0 && ratioBase[1] > 0
-      ? `${fmt(ratioBase[0] / ratioBase[1], 2)} : 1`
-      : "—";
 
   const sameName = (a, b) =>
     String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
@@ -783,7 +749,6 @@ const Analytics = () => {
   const coverage = {
     vessels: `${fmt(ships.total)} ships on record`,
     berths: `${fmt(berths.total)} berths on record`,
-    cargo: `${fmt(cargo.loaded)} cargo records`,
     container: `${fmt(containers.published)} months published${
       containers.latest ? `, latest ${containers.latest}` : ""
     }`,
@@ -1020,7 +985,7 @@ const Analytics = () => {
 
       <SectionTitle note={label}>Selected period at a glance</SectionTitle>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         <StatTile
           testId="tile-entries"
           label="Truck entries"
@@ -1082,18 +1047,6 @@ const Analytics = () => {
             incidents.averageResolve === null
               ? "None resolved in this period"
               : `Average ${fmtDuration(incidents.averageResolve)} to resolve`
-          )}
-        />
-
-        <StatTile
-          testId="tile-cargo"
-          label="Cargo records added"
-          value={shown(cargoState, fmt(cargo.addedTotal))}
-          note={note(
-            cargoState,
-            `${fmt(cargo.loaded)} cargo record${
-              cargo.loaded === 1 ? "" : "s"
-            } in total`
           )}
         />
       </div>
@@ -1384,7 +1337,7 @@ const Analytics = () => {
         <Panel
           testId="panel-radar"
           title="Operational Performance"
-          subtitle="Five scores from 0 to 100, each worked out from real records. How each score is calculated is written under the graph."
+          subtitle="Four scores from 0 to 100, each worked out from real records. How each score is calculated is written under the graph."
         >
           <RadarChart
             testId="chart-radar"
@@ -1671,127 +1624,6 @@ const Analytics = () => {
                   emptyText="No statuses."
                 />
               </div>
-            </div>
-          )}
-        </Panel>
-      </div>
-
-      {/* =====================================================
-          CARGO RECORDS
-          ===================================================== */}
-
-      <SectionTitle note={periodNote}>Cargo records</SectionTitle>
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <Panel
-          testId="panel-cargo"
-          title="Cargo records added"
-          subtitle="Cargo entries that were registered in the period."
-          action={
-            <OpenLink to="/admin/cargo" allowed={canOpen("cargo")}>
-              Open Cargo Operations
-            </OpenLink>
-          }
-        >
-          {!isReady(cargoState) ? (
-            <StateNote state={cargoState} what="cargo records" />
-          ) : (
-            <ColumnChart
-              testId="chart-cargo"
-              buckets={grid.buckets}
-              series={cargoAddedSeries}
-              unitWord="records"
-              label={`Cargo records added ${grid.unit}, ${label}`}
-              emptyText="No cargo records were added in this period."
-            />
-          )}
-        </Panel>
-
-        <Panel
-          testId="panel-cargo-mix"
-          title="Cargo records by progress"
-          subtitle="Where the cargo registered in this period stands now."
-        >
-          {!isReady(cargoState) ? (
-            <StateNote state={cargoState} what="cargo records" />
-          ) : cargo.addedTotal === 0 ? (
-            <Empty>No cargo records were added in this period.</Empty>
-          ) : (
-            <div className="space-y-6">
-              <ShareBar
-                testId="share-cargo-status"
-                emptyText="No cargo records."
-                items={cargo.statuses}
-              />
-
-              {cargo.withOperation > 0 ? (
-                <div data-testid="import-export">
-                  <p className="mb-3 text-sm font-semibold text-navy-700 dark:text-white">
-                    Import and export
-                  </p>
-
-                  <BarList
-                    testId="bars-import-export"
-                    emptyText="No import or export records."
-                    items={[
-                      {
-                        label: "Import",
-                        value: importExport.Import.records,
-                        color: "var(--an-s1)",
-                        text: `${fmt(importExport.Import.records)} records${
-                          importExport.Import.weighed
-                            ? ` · ${fmt(importExport.Import.tonnes, 1)} t`
-                            : ""
-                        }`,
-                      },
-                      {
-                        label: "Export",
-                        value: importExport.Export.records,
-                        color: "var(--an-s2)",
-                        text: `${fmt(importExport.Export.records)} records${
-                          importExport.Export.weighed
-                            ? ` · ${fmt(importExport.Export.tonnes, 1)} t`
-                            : ""
-                        }`,
-                      },
-                    ]}
-                  />
-
-                  <p
-                    data-testid="import-export-ratio"
-                    className="mt-3 text-sm text-gray-600 dark:text-gray-300"
-                  >
-                    Import : Export ={" "}
-                    <span className="font-bold text-navy-700 dark:text-white">
-                      {ratioText}
-                    </span>{" "}
-                    (by {byTonnes ? "tonnes" : "number of records"})
-                  </p>
-                </div>
-              ) : (
-                <p
-                  data-testid="import-export-missing"
-                  className="rounded-xl bg-lightPrimary px-4 py-3 text-sm text-gray-600 dark:bg-navy-900 dark:text-gray-300"
-                >
-                  These cargo records do not say whether they are imports or
-                  exports, so no import / export split can be shown.
-                </p>
-              )}
-
-              {cargo.kinds.length > 0 && (
-                <div>
-                  <p className="mb-3 text-sm font-semibold text-navy-700 dark:text-white">
-                    Cargo types
-                  </p>
-
-                  <BarList
-                    testId="bars-cargo-types"
-                    color="var(--an-s3)"
-                    items={cargo.kinds}
-                    emptyText="No cargo types."
-                  />
-                </div>
-              )}
             </div>
           )}
         </Panel>
