@@ -194,15 +194,30 @@ const saveShipCache = (records) => {
   }
 };
 
-/* Map pictures (tiles). CARTO's map server answers from a nearby
-   copy of the map in many countries, so it loads much faster
-   than the main OpenStreetMap server, especially on slow
-   networks. It shows the same OpenStreetMap data. */
+/* Map pictures (tiles) for the Default map.
+
+   The CARTO tile server (basemaps.cartocdn.com) now stamps
+   "API KEY REQUIRED" on every tile that is requested without an
+   API key, so it is no longer used.
+
+   Esri World Street Map is used instead. It needs no key, it is
+   the same provider (arcgisonline.com) as the Satellite map, so
+   it is already reachable on this network, and it is fast.
+
+   Note: Esri tile addresses are {z}/{y}/{x} (y before x), and
+   there are no subdomains, so no {s} and no "subdomains" prop.
+   The highest zoom with pictures is 19.
+
+   To use OpenStreetMap instead, put these two lines:
+     url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+     (and keep DEFAULT_TILE_MAX_ZOOM at 19) */
 const DEFAULT_TILE_URL =
-  "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png";
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
 
 const DEFAULT_TILE_ATTRIBUTION =
-  "&copy; OpenStreetMap contributors &copy; CARTO";
+  "Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, and the GIS User Community";
+
+const DEFAULT_TILE_MAX_ZOOM = 19;
 
 /* A saved position older than this is drawn faded and counted as
    "older". Same rule as the Vessels page. Display only. */
@@ -2503,14 +2518,18 @@ const PortMap = () => {
 
             {/* =================================================
                 DEFAULT MAP
+
+                Esri World Street Map. No "subdomains" prop (Esri
+                has none) and maxZoom 19 (the highest zoom Esri
+                has pictures for).
                 ================================================= */}
 
             {mapType === "default" && (
               <TileLayer
+                key="tiles-default"
                 attribution={DEFAULT_TILE_ATTRIBUTION}
                 url={DEFAULT_TILE_URL}
-                subdomains="abcd"
-                maxZoom={20}
+                maxZoom={DEFAULT_TILE_MAX_ZOOM}
                 keepBuffer={4}
                 updateWhenZooming={false}
               />
@@ -2522,8 +2541,10 @@ const PortMap = () => {
 
             {mapType === "satellite" && (
               <TileLayer
+                key="tiles-satellite"
                 attribution="&copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community"
                 url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                maxZoom={19}
                 keepBuffer={4}
                 updateWhenZooming={false}
               />
