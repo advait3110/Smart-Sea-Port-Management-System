@@ -28,16 +28,30 @@ import {
   listAvailableBerths,
 } from "../Berths/berthNumbers";
 
+// The CSV files imported on the Cargo Operations page are kept in this
+// browser. This file reads them (and turns them into series) so the
+// Dashboard shows the same figures.
+import {
+  STORAGE_KEY as CARGO_STORAGE_KEY,
+  loadStored,
+  predictionSeries,
+} from "../DelayPrediction/cargoSeries";
+
 // =========================================================
 // PORT DASHBOARD (Port of Singapore)
 // =========================================================
 //
 // Every figure on this page is worked out from the port's own
-// records: vessels, cargo, gate trucks, incidents, equipment,
-// notifications, published throughput and live weather. The berth
-// figures come from the ships at berth and the berth numbers of
-// Berth Management (one shared file gives the numbers to both
-// pages). Nothing here is sample data. When nobody has entered
+// records: vessels, gate trucks, incidents, equipment,
+// notifications and live weather. The berth figures come from the
+// ships at berth and the berth numbers of Berth Management (one
+// shared file gives the numbers to both pages).
+//
+// The cargo figures (cargo statistics, container throughput and
+// cargo throughput) come from the CSV files imported on the Cargo
+// Operations page. Those files are kept in this browser only, so
+// this page shows them on the computer where they were imported.
+// Nothing here is sample data. When nobody has entered or imported
 // anything yet, the page shows 0 or an empty message.
 //
 // Each part is loaded on its own. If your account is not allowed
@@ -53,11 +67,10 @@ const WEATHER_REFRESH_MS = 10 * 60 * 1000;
 // Vacant berth numbers written out in the Berth status panel.
 const VACANT_SHOWN = 12;
 
+const NO_CSV_TEXT = "No CSVs uploaded, please upload CSV in Cargo Operations.";
+
 const SOURCES = [
   { key: "vessels", path: "/vessels" },
-  { key: "cargo", path: "/cargo" },
-  { key: "container", path: "/throughput?metric=container" },
-  { key: "cargoYears", path: "/throughput?metric=cargo" },
   { key: "trucks", path: "/trucks" },
   { key: "incidents", path: "/incidents" },
   { key: "assets", path: "/assets" },
@@ -265,16 +278,6 @@ const isDenied = (error) =>
     String(error?.message || "")
   );
 
-const prettyStatus = (value) => {
-  const text = String(value || "Unknown")
-    .replace(/[_-]+/g, " ")
-    .trim();
-
-  return (
-    text.charAt(0).toUpperCase() + text.slice(1)
-  );
-};
-
 const compass = (degrees) => {
   if (
     degrees === null ||
@@ -308,21 +311,6 @@ const compass = (degrees) => {
     Math.round(((Number(degrees) % 360) + 360) % 360 / 22.5) % 16;
 
   return names[index];
-};
-
-const countBy = (list, pick) => {
-  const counts = new Map();
-
-  list.forEach((item) => {
-    const key = pick(item);
-
-    counts.set(key, (counts.get(key) || 0) + 1);
-  });
-
-  return [...counts.entries()].map(([label, value]) => ({
-    label,
-    value,
-  }));
 };
 
 // =========================================================
@@ -433,15 +421,163 @@ const summariseBerths = (vessels) => {
   };
 };
 
-const summariseCargo = (cargo, today) => ({
-  total: cargo.length,
-  addedToday: cargo.filter(
-    (item) => dayKey(item?.created_at) === today
-  ).length,
-  byStatus: countBy(cargo, (item) =>
-    prettyStatus(item?.status)
-  ).sort((a, b) => b.value - a.value),
-});
+// ---------------------------------------------------------
+// CARGO FIGURES FROM THE IMPORTED CSV FILES
+//
+// predictionSeries() (DelayPrediction/cargoSeries.js) turns the
+// stored files into series: { key, name, unit, frequency, points }.
+// Points are { period: "2026-03" | "2025", value }.
+// ---------------------------------------------------------
+
+const yearOfPeriod = (period) => String(period).slice(0, 4);
+
+// Totals per year of one series: [{ year, value, months, full }].
+// A yearly series gives one full entry per year. A monthly series is
+// summed per year, and a year is "full" when it has 12 months.
+const yearTotalsOf = (series) => {
+  if (!series) {
+    return [];
+  }
+
+  if (series.frequency === "yearly") {
+    return series.points
+      .map((point) => ({
+        year: yearOfPeriod(point.period),
+        value: point.value,
+        months: 12,
+        full: true,
+      }))
+      .sort((a, b) => a.year.localeCompare(b.year));
+  }
+
+  const groups = new Map();
+
+  series.points.forEach((point) => {
+    const year = yearOfPeriod(point.period);
+
+    const group = groups.get(year) || { year, value: 0, months: 0 };
+
+    group.value += point.value;
+    group.months += 1;
+
+    groups.set(year, group);
+  });
+
+  return [...groups.values()]
+    .map((group) => ({ ...group, full: group.months >= 12 }))
+    .sort((a, b) => a.year.localeCompare(b.year));
+};
+
+// The latest full year, or the latest year when none is complete.
+const pickYear = (totals) => {
+  const full = totals.filter((item) => item.full);
+
+  if (full.length > 0) {
+    return full[full.length - 1];
+  }
+
+  return totals.length > 0 ? totals[totals.length - 1] : null;
+};
+
+const findSeries = (list, key) => list.find((item) => item.key === key);
+
+const summariseCargoFiles = (data) => {
+  const list = predictionSeries(data);
+
+  const total = findSeries(list, "cargo_monthly") || findSeries(list, "cargo_yearly");
+
+  const containers =
+    findSeries(list, "containers_monthly") ||
+    findSeries(list, "containers_yearly");
+
+  const typeSeries = list.filter((item) => item.key.startsWith("cargo_type_"));
+
+  const latest = pickYear(yearTotalsOf(total));
+
+  let year = latest ? latest.year : null;
+
+  if (!year && typeSeries.length > 0) {
+    const fromType = pickYear(yearTotalsOf(typeSeries[0]));
+
+    year = fromType ? fromType.year : null;
+  }
+
+  const types = year
+    ? typeSeries
+        .map((series) => {
+          const match = yearTotalsOf(series).find((item) => item.year === year);
+
+          return {
+            label: series.name.replace(/ cargo( \(yearly\))?$/i, ""),
+            value: match ? match.value : 0,
+          };
+        })
+        .filter((item) => item.value > 0)
+        .sort((a, b) => b.value - a.value)
+    : [];
+
+  const containerLatest = pickYear(yearTotalsOf(containers));
+
+  let totalValue = null;
+
+  if (latest) {
+    totalValue = latest.value;
+  } else if (types.length > 0) {
+    totalValue = types.reduce((sum, item) => sum + item.value, 0);
+  }
+
+  return {
+    hasData: list.length > 0,
+    datasets: Object.keys(data).length,
+    year,
+    partial: Boolean(latest && !latest.full),
+    total: totalValue,
+    types,
+    containerYear: containerLatest ? containerLatest.year : null,
+    containerValue: containerLatest ? containerLatest.value : null,
+    containerPartial: Boolean(containerLatest && !containerLatest.full),
+    containerSeries: containers || null,
+    totalSeries: total || null,
+  };
+};
+
+// Bars of a chart: the last 12 months of a monthly series, or the last
+// 6 full years (a yearly series, or the sum of the months of a year).
+const barsFromSeries = (series, perMonth) => {
+  if (!series) {
+    return [];
+  }
+
+  if (perMonth && series.frequency === "monthly") {
+    return series.points.slice(-12).map((point, index, all) => {
+      const [year, month] = String(point.period).split("-");
+
+      const monthIndex = Number(month) - 1;
+
+      const showYear =
+        index === 0 ||
+        monthIndex === 0 ||
+        String(all[index - 1].period).split("-")[0] !== year;
+
+      return {
+        label: MONTHS[monthIndex] || String(point.period),
+        sub: showYear ? year : "",
+        title: `${MONTHS[monthIndex] || point.period} ${year}`,
+        value: point.value,
+      };
+    });
+  }
+
+  return yearTotalsOf(series)
+    .filter((item) => item.full)
+    .slice(-6)
+    .map((item) => ({
+      label: item.year,
+      sub: "",
+      title: item.year,
+      value: item.value,
+    }));
+};
 
 // Same reading of a truck as the Gate & Truck Management page.
 const entryOf = (truck) =>
@@ -582,49 +718,6 @@ const summariseAssets = (payload) => {
     },
     alerts: asList(payload?.alerts).slice(0, 5),
   };
-};
-
-const summariseThroughput = (rows, metric) => {
-  const totals = new Map();
-
-  rows.forEach((row) => {
-    const period = String(row?.period || "").trim();
-
-    if (period) {
-      totals.set(period, (totals.get(period) || 0) + num(row?.value));
-    }
-  });
-
-  const sorted = [...totals.entries()].sort((a, b) =>
-    a[0].localeCompare(b[0])
-  );
-
-  if (metric === "container") {
-    return sorted.slice(-12).map(([period, value], index, all) => {
-      const [year, month] = period.split("-");
-
-      const monthIndex = Number(month) - 1;
-
-      const showYear =
-        index === 0 ||
-        monthIndex === 0 ||
-        all[index - 1][0].split("-")[0] !== year;
-
-      return {
-        label: MONTHS[monthIndex] || period,
-        sub: showYear ? year : "",
-        title: `${MONTHS[monthIndex] || period} ${year}`,
-        value,
-      };
-    });
-  }
-
-  return sorted.slice(-6).map(([period, value]) => ({
-    label: period,
-    sub: "",
-    title: period,
-    value,
-  }));
 };
 
 // =========================================================
@@ -1128,6 +1221,16 @@ const loadSource = async (source) => {
   }
 };
 
+// The raw text of the imported CSV data in this browser. It only
+// changes when files are imported or removed on Cargo Operations.
+const readCargoSignature = () => {
+  try {
+    return window.localStorage.getItem(CARGO_STORAGE_KEY) || "";
+  } catch (error) {
+    return "";
+  }
+};
+
 const Dashboard = () => {
   const user = authService.getCurrentUser();
 
@@ -1142,6 +1245,9 @@ const Dashboard = () => {
       ])
     )
   );
+
+  const [cargoSignature, setCargoSignature] =
+    React.useState(readCargoSignature);
 
   const [updatedAt, setUpdatedAt] = React.useState(null);
 
@@ -1163,6 +1269,10 @@ const Dashboard = () => {
     busyRef.current = true;
 
     setRefreshing(true);
+
+    // The imported CSV files are read from this browser, not from
+    // the backend, so they are checked on every refresh.
+    setCargoSignature(readCargoSignature());
 
     try {
       const now = Date.now();
@@ -1226,7 +1336,16 @@ const Dashboard = () => {
       }
     };
 
+    // Files imported in another tab of this browser.
+    const handleStorage = (event) => {
+      if (!event.key || event.key === CARGO_STORAGE_KEY) {
+        setCargoSignature(readCargoSignature());
+      }
+    };
+
     document.addEventListener("visibilitychange", handleVisible);
+
+    window.addEventListener("storage", handleStorage);
 
     return () => {
       aliveRef.current = false;
@@ -1237,6 +1356,8 @@ const Dashboard = () => {
         "visibilitychange",
         handleVisible
       );
+
+      window.removeEventListener("storage", handleStorage);
     };
   }, [refresh]);
 
@@ -1258,9 +1379,12 @@ const Dashboard = () => {
     [sources.vessels.data]
   );
 
+  // The imported CSV files (cargo, containers). Read again only when
+  // the stored text changes.
   const cargo = React.useMemo(
-    () => summariseCargo(asList(sources.cargo.data), today),
-    [sources.cargo.data, today]
+    () => summariseCargoFiles(loadStored()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cargoSignature]
   );
 
   const trucks = React.useMemo(
@@ -1281,19 +1405,18 @@ const Dashboard = () => {
     [sources.assets.data]
   );
 
+  const containerPerMonth = Boolean(
+    cargo.containerSeries && cargo.containerSeries.frequency === "monthly"
+  );
+
   const containerBars = React.useMemo(
-    () =>
-      summariseThroughput(
-        asList(sources.container.data),
-        "container"
-      ),
-    [sources.container.data]
+    () => barsFromSeries(cargo.containerSeries, true),
+    [cargo.containerSeries]
   );
 
   const cargoBars = React.useMemo(
-    () =>
-      summariseThroughput(asList(sources.cargoYears.data), "cargo"),
-    [sources.cargoYears.data]
+    () => barsFromSeries(cargo.totalSeries, false),
+    [cargo.totalSeries]
   );
 
   const notifications = asList(sources.notifications.data);
@@ -1667,8 +1790,14 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Panel
           testId="panel-cargo"
-          title="Cargo records"
-          subtitle="By status"
+          title="Cargo statistics"
+          subtitle={
+            cargo.year
+              ? `Port of Singapore, ${cargo.year}${
+                  cargo.partial ? " (months so far)" : ""
+                }, from the imported CSV files`
+              : "From the CSV files imported in Cargo Operations"
+          }
           icon={
             <MdInventory2 className="h-7 w-7 text-brand-500 dark:text-brand-400" />
           }
@@ -1678,29 +1807,58 @@ const Dashboard = () => {
             </OpenLink>
           }
         >
-          {isReady(sources.cargo) ? (
+          {cargo.hasData ? (
             <div className="space-y-5">
               <div className="grid grid-cols-2 gap-4">
                 <MiniStat
                   testId="cargo-total"
-                  label="Cargo records"
-                  value={fmt(cargo.total)}
+                  label="Total cargo"
+                  value={
+                    cargo.total !== null
+                      ? `${fmt(cargo.total / 1000, 1)} M tonnes`
+                      : "—"
+                  }
+                  note={cargo.year ? `Year ${cargo.year}` : ""}
                 />
 
                 <MiniStat
-                  testId="cargo-today"
-                  label="Added today"
-                  value={fmt(cargo.addedToday)}
+                  testId="cargo-containers"
+                  label="Containers"
+                  value={
+                    cargo.containerValue !== null
+                      ? `${fmt(cargo.containerValue / 1000, 2)} M TEU`
+                      : "—"
+                  }
+                  note={
+                    cargo.containerYear
+                      ? `Year ${cargo.containerYear}${
+                          cargo.containerPartial ? " (months so far)" : ""
+                        }`
+                      : ""
+                  }
                 />
               </div>
 
-              <BarList
-                items={cargo.byStatus}
-                emptyText="No cargo records have been entered yet."
-              />
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-400">
+                  Cargo by type (thousand tonnes)
+                </p>
+
+                <BarList
+                  items={cargo.types}
+                  emptyText="Import the Cargo Throughput Breakdown file in Cargo Operations to see the cargo by type."
+                />
+              </div>
+
+              <p className="text-xs text-gray-400">
+                {fmt(cargo.datasets)} imported{" "}
+                {cargo.datasets === 1 ? "file" : "files"}. They are kept in
+                this browser, so these figures show on the computer where
+                they were imported.
+              </p>
             </div>
           ) : (
-            <StateNote state={sources.cargo} what="the cargo records" />
+            <Empty>{NO_CSV_TEXT}</Empty>
           )}
         </Panel>
 
@@ -1782,24 +1940,28 @@ const Dashboard = () => {
         <Panel
           testId="panel-container"
           title="Container throughput"
-          subtitle="Thousand TEU per month (published figures imported in Cargo Operations)"
+          subtitle={`Thousand TEU per ${
+            containerPerMonth ? "month" : "year"
+          } (from the CSV files imported in Cargo Operations)`}
+          action={
+            <OpenLink to="/admin/cargo" allowed={canOpen("cargo")}>
+              Open
+            </OpenLink>
+          }
         >
-          {isReady(sources.container) ? (
-            containerBars.length === 0 ? (
-              <Empty>
-                No container throughput figures have been imported yet.
-              </Empty>
-            ) : (
-              <ColumnChart
-                items={containerBars}
-                unit="thousand TEU"
-                label="Container throughput per month"
-              />
-            )
+          {containerBars.length === 0 ? (
+            <Empty>
+              {cargo.hasData
+                ? "No container throughput CSV has been imported yet. Import it in Cargo Operations."
+                : NO_CSV_TEXT}
+            </Empty>
           ) : (
-            <StateNote
-              state={sources.container}
-              what="the container throughput"
+            <ColumnChart
+              items={containerBars}
+              unit="thousand TEU"
+              label={`Container throughput per ${
+                containerPerMonth ? "month" : "year"
+              }`}
             />
           )}
         </Panel>
@@ -1807,24 +1969,24 @@ const Dashboard = () => {
         <Panel
           testId="panel-cargo-years"
           title="Cargo throughput"
-          subtitle="Thousand tonnes per year (published figures imported in Cargo Operations)"
+          subtitle="Thousand tonnes per year (from the CSV files imported in Cargo Operations)"
+          action={
+            <OpenLink to="/admin/cargo" allowed={canOpen("cargo")}>
+              Open
+            </OpenLink>
+          }
         >
-          {isReady(sources.cargoYears) ? (
-            cargoBars.length === 0 ? (
-              <Empty>
-                No cargo throughput figures have been imported yet.
-              </Empty>
-            ) : (
-              <ColumnChart
-                items={cargoBars}
-                unit="thousand tonnes"
-                label="Cargo throughput per year"
-              />
-            )
+          {cargoBars.length === 0 ? (
+            <Empty>
+              {cargo.hasData
+                ? "No full year of cargo throughput has been imported yet. Import the cargo throughput CSV in Cargo Operations."
+                : NO_CSV_TEXT}
+            </Empty>
           ) : (
-            <StateNote
-              state={sources.cargoYears}
-              what="the cargo throughput"
+            <ColumnChart
+              items={cargoBars}
+              unit="thousand tonnes"
+              label="Cargo throughput per year"
             />
           )}
         </Panel>
