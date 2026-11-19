@@ -1627,7 +1627,7 @@ const Weather = () => {
             </div>
 
             <div className="mt-5 overflow-x-auto">
-              <table className="w-full min-w-[900px]">
+              <table className="w-full min-w-[820px]">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-white/10">
                     {[
@@ -1714,7 +1714,7 @@ const Weather = () => {
                             : "--"}
                         </td>
 
-                        <td className="min-w-[150px] px-3 py-4">
+                        <td className="px-3 py-4">
                           {flags.length > 0 ? (
                             <div className="flex flex-wrap gap-2">
                               {flags.map((flag) => (
@@ -1727,7 +1727,7 @@ const Weather = () => {
                               ))}
                             </div>
                           ) : (
-                            <span className="text-sm text-gray-400">
+                            <span className="inline-block whitespace-nowrap rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-400 dark:bg-white/5 dark:text-gray-400">
                               {noWeather ? "--" : "None"}
                             </span>
                           )}
