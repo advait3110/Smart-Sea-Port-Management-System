@@ -1627,7 +1627,7 @@ const Weather = () => {
             </div>
 
             <div className="mt-5 overflow-x-auto">
-              <table className="w-full min-w-[900px]">
+              <table className="w-full min-w-[1000px]">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-white/10">
                     {[
@@ -1642,7 +1642,7 @@ const Weather = () => {
                     ].map((heading) => (
                       <th
                         key={heading}
-                        className="px-4 py-4 text-left text-xs font-bold uppercase tracking-wide text-gray-400"
+                        className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wide text-gray-400"
                       >
                         {heading}
                       </th>
@@ -1710,11 +1710,18 @@ const Weather = () => {
                             : "--"}
                         </td>
 
-                        <td className="px-4 py-4">
+                        <td className="min-w-[170px] px-4 py-4">
                           {flags.length > 0 ? (
-                            <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-bold text-orange-600 dark:bg-orange-500/10 dark:text-orange-400">
-                              {flags.join(", ")}
-                            </span>
+                            <div className="flex flex-wrap gap-2">
+                              {flags.map((flag) => (
+                                <span
+                                  key={flag}
+                                  className="inline-block whitespace-nowrap rounded-full bg-orange-100 px-3 py-1 text-xs font-bold text-orange-600 dark:bg-orange-500/10 dark:text-orange-400"
+                                >
+                                  {flag}
+                                </span>
+                              ))}
+                            </div>
                           ) : (
                             <span className="text-sm text-gray-400">
                               {noWeather ? "--" : "None"}
