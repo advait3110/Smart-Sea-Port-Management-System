@@ -1627,7 +1627,7 @@ const Weather = () => {
             </div>
 
             <div className="mt-5 overflow-x-auto">
-              <table className="w-full min-w-[1000px]">
+              <table className="w-full min-w-[900px]">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-white/10">
                     {[
@@ -1639,10 +1639,14 @@ const Weather = () => {
                       "Max wave",
                       "Max current",
                       "Over limits",
-                    ].map((heading) => (
+                    ].map((heading, index) => (
                       <th
                         key={heading}
-                        className="whitespace-nowrap px-4 py-4 text-left text-xs font-bold uppercase tracking-wide text-gray-400"
+                        className={`px-3 py-4 text-left text-xs font-bold uppercase tracking-wide text-gray-400 ${
+                          index === 0
+                            ? "sticky left-0 z-10 whitespace-nowrap bg-white dark:bg-navy-800"
+                            : ""
+                        }`}
                       >
                         {heading}
                       </th>
@@ -1665,11 +1669,11 @@ const Weather = () => {
                         key={day.date}
                         className="border-b border-gray-100 last:border-0 dark:border-white/5"
                       >
-                        <td className="whitespace-nowrap px-4 py-4 font-bold text-navy-700 dark:text-white">
+                        <td className="sticky left-0 z-10 whitespace-nowrap bg-white px-3 py-4 font-bold text-navy-700 dark:bg-navy-800 dark:text-white">
                           {formatDate(day.date)}
                         </td>
 
-                        <td className="px-4 py-4 text-sm text-gray-500 dark:text-gray-300">
+                        <td className="px-3 py-4 text-sm text-gray-500 dark:text-gray-300">
                           {isNumber(day.weather_code)
                             ? getWeatherCondition(Number(day.weather_code))
                             : noWeather
@@ -1677,7 +1681,7 @@ const Weather = () => {
                             : "--"}
                         </td>
 
-                        <td className="whitespace-nowrap px-4 py-4 text-sm text-gray-500 dark:text-gray-300">
+                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">
                           {noWeather
                             ? "--"
                             : `${formatNumber(
@@ -1686,31 +1690,31 @@ const Weather = () => {
                               )}° / ${formatNumber(day.temperature_min, 1)}°`}
                         </td>
 
-                        <td className="whitespace-nowrap px-4 py-4 text-sm text-gray-500 dark:text-gray-300">
+                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">
                           {isNumber(day.rain_total_mm)
                             ? `${formatNumber(day.rain_total_mm, 1)} mm`
                             : "--"}
                         </td>
 
-                        <td className="whitespace-nowrap px-4 py-4 text-sm text-gray-500 dark:text-gray-300">
+                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">
                           {isNumber(day.wind_max_kmh)
                             ? `${formatNumber(day.wind_max_kmh, 0)} km/h`
                             : "--"}
                         </td>
 
-                        <td className="whitespace-nowrap px-4 py-4 text-sm text-gray-500 dark:text-gray-300">
+                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">
                           {isNumber(day.wave_height_max_m)
                             ? `${formatNumber(day.wave_height_max_m, 1)} m`
                             : "--"}
                         </td>
 
-                        <td className="whitespace-nowrap px-4 py-4 text-sm text-gray-500 dark:text-gray-300">
+                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">
                           {dayCurrentKnots !== null
                             ? `${formatNumber(dayCurrentKnots, 1)} kn`
                             : "--"}
                         </td>
 
-                        <td className="min-w-[170px] px-4 py-4">
+                        <td className="min-w-[150px] px-3 py-4">
                           {flags.length > 0 ? (
                             <div className="flex flex-wrap gap-2">
                               {flags.map((flag) => (
