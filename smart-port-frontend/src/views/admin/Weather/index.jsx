@@ -2112,7 +2112,7 @@ const Weather = () => {
           {forecastData.map((day) => (
             <div
               key={day.date}
-              className="flex min-w-0 flex-col rounded-xl bg-lightPrimary p-5 text-center dark:bg-navy-700"
+              className="flex min-w-0 flex-col rounded-xl bg-lightPrimary px-3 py-5 text-center dark:bg-navy-700"
             >
               <p className="min-h-[24px] whitespace-nowrap font-bold text-navy-700 dark:text-white">
                 {day.day}
@@ -2122,7 +2122,7 @@ const Weather = () => {
                 <MdCloud className="h-9 w-9 text-brand-500" />
               </div>
 
-              <div className="flex h-[48px] items-start justify-center">
+              <div className="flex min-h-[72px] flex-1 items-start justify-center">
                 <p className="text-sm font-medium leading-6 text-gray-500 dark:text-gray-300">
                   {day.condition}
                 </p>
