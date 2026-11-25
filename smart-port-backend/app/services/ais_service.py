@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db
@@ -721,15 +722,31 @@ def upsert_ais_vessel(
     db: Session,
     vessel_data: dict[str, Any],
 ) -> tuple[Vessel, bool]:
-    """Insert or update a vessel identified by MMSI."""
+    """
+    Insert or update a vessel.
+
+    A vessel is found by MMSI first. When the MMSI is not on file but the
+    IMO number is, it is the same ship with a new MMSI (re-flagged or
+    re-registered), so that vessel is updated and takes the new MMSI.
+    This keeps the unique IMO index from rejecting a duplicate insert.
+    """
 
     mmsi = str(vessel_data["mmsi"])
+    imo = vessel_data.get("imo_number")
 
     vessel = db.scalar(
         select(Vessel).where(Vessel.mmsi == mmsi)
     )
 
+    # Not found by MMSI: try the IMO number. (Queries flush pending
+    # ships of the same batch first, so those are found too.)
+    if vessel is None and imo:
+        vessel = db.scalar(
+            select(Vessel).where(Vessel.imo_number == imo)
+        )
+
     created = vessel is None
+    data = dict(vessel_data)
 
     if created:
         # The model's own default status is "anchored". A new vessel must
@@ -737,13 +754,26 @@ def upsert_ais_vessel(
         # as "unknown"; a reported navigation status overrides it below.
         vessel = Vessel(
             mmsi=mmsi,
-            vessel_name=vessel_data.get("vessel_name") or f"Vessel {mmsi}",
+            vessel_name=data.get("vessel_name") or f"Vessel {mmsi}",
             vessel_type="Unknown",
             status="unknown",
         )
         db.add(vessel)
+    elif imo and vessel.imo_number != imo:
+        # Never write an IMO number that another ship already holds.
+        other_id = db.scalar(
+            select(Vessel.id).where(
+                Vessel.imo_number == imo,
+                Vessel.id != vessel.id,
+            )
+        )
 
-    for field, value in vessel_data.items():
+        if other_id is not None:
+            data.pop("imo_number", None)
+
+    # "mmsi" in data also moves a ship found by IMO to its new MMSI.
+    # That is safe: the MMSI lookup above found no other vessel with it.
+    for field, value in data.items():
         if value is not None and hasattr(vessel, field):
             setattr(vessel, field, value)
 
@@ -803,22 +833,48 @@ def _persist_records(
     db: Session,
     records: list[dict[str, Any]],
 ) -> tuple[int, int, int]:
-    """Save vessels and history. Returns (created, updated, history_saved)."""
+    """Save vessels and history. Returns (created, updated, history_saved).
+
+    Each ship is saved inside its own savepoint, so one ship the database
+    refuses is skipped (and logged) instead of losing the whole batch.
+    """
 
     created_count = 0
     updated_count = 0
     history_count = 0
+    skipped_count = 0
 
     for record in records:
-        _, created = upsert_ais_vessel(db, record)
+        try:
+            with db.begin_nested():
+                _, created = upsert_ais_vessel(db, record)
+                history_added = save_ais_history_snapshot(db, record)
+                db.flush()
+        except IntegrityError as exc:
+            skipped_count += 1
+            logger.warning(
+                "AIS record skipped (MMSI %s, IMO %s): %s",
+                record.get("mmsi"),
+                record.get("imo_number"),
+                str(getattr(exc, "orig", exc)).splitlines()[0][:200],
+            )
+            continue
 
-        if save_ais_history_snapshot(db, record):
+        if history_added:
             history_count += 1
 
         if created:
             created_count += 1
         else:
             updated_count += 1
+
+    if skipped_count:
+        logger.warning(
+            "AIS save: %d of %d record(s) skipped because of a "
+            "duplicate identifier.",
+            skipped_count,
+            len(records),
+        )
 
     return created_count, updated_count, history_count
 
