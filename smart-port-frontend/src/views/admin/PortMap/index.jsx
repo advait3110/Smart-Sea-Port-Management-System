@@ -69,16 +69,14 @@ Operational circle: drag the round handle on its edge (or use the
 slider in the Port panel) to resize it. The ships inside it are
 counted. Its size is saved in this browser only.
 
-Incidents (red "!" markers): real incidents from the database
-(GET /incidents) that have a spot on the map and are still open
-(not Resolved / Closed). Every account that can open this map sees
-the same ones. An account with the Incident Management permission
-can right-click the map to report an incident at that spot
-(POST /incidents with latitude / longitude). The backend then tells
-the accounts that must know (by incident type, see
-incident_service.py) to look at the map. Incidents reported in Port
-Alerts or Incident Management have no map spot, so they are not drawn
-here.
+Incidents: records are read from the same GET /incidents register
+used by Incident Management. All statuses (including Resolved and
+Closed) are displayed when coordinates are available. Each incident
+type has its own marker. Older records without coordinates are matched
+to a berth only when the location exactly matches its name or code;
+other unlocated records are listed in the side panel instead of being
+placed at an invented position. Right-clicking the map reports an
+incident with the selected latitude / longitude.
 
 Gate / truck markers (Operations panel) are placed by hand: drag to
 move, double-click to add another one next to it, right-click an added
@@ -418,7 +416,31 @@ const getShipIcon = (portState, size, selected) => {
 };
 
 const gateIcon = createIcon("#7c3aed", "🚚", "emoji", 42);
-const alertIcon = createIcon("#dc2626", "!", "text", 40);
+
+/* Each incident category has its own marker. Keep the values aligned
+   with INCIDENT_TYPES and the backend incident_service.py list. */
+const INCIDENT_MARKER_CONFIG = {
+  "Vessel Incident": { color: "#2563eb", symbol: "🚢" },
+  "Equipment Failure": { color: "#d97706", symbol: "🔧" },
+  "Gate/Security Incident": { color: "#7c3aed", symbol: "🛡️" },
+  "Environmental Incident": { color: "#16a34a", symbol: "🌿" },
+  "Fire/Safety": { color: "#dc2626", symbol: "🔥" },
+  "Injury / Medical": { color: "#0891b2", symbol: "✚" },
+  "Cargo Damage": { color: "#9333ea", symbol: "📦" },
+  Other: { color: "#475569", symbol: "ℹ️" },
+};
+
+const incidentIconCache = {};
+
+const getIncidentIcon = (type) => {
+  const config = INCIDENT_MARKER_CONFIG[type] || INCIDENT_MARKER_CONFIG.Other;
+
+  if (!incidentIconCache[type]) {
+    incidentIconCache[type] = createIcon(config.color, config.symbol, "emoji", 42);
+  }
+
+  return incidentIconCache[type];
+};
 
 /* =========================================================
    GATE / TRUCK MARKERS (starting positions, not survey data)
@@ -454,8 +476,6 @@ const INCIDENT_TYPES = [
 ];
 
 const INCIDENT_SEVERITIES = ["Critical", "High", "Medium", "Low"];
-
-const FINISHED_INCIDENT_STATUSES = ["Resolved", "Closed"];
 
 const MAX_INCIDENT_LOCATION = 120;
 const MAX_INCIDENT_VESSEL = 120;
@@ -813,39 +833,76 @@ const normalizeBerth = (berth) => {
 /* =========================================================
    INCIDENT NORMALIZER
 
-   Only open incidents with a valid map spot are drawn.
+   All statuses are shown, including Resolved and Closed. Incidents
+   with explicit coordinates use them. Older records without
+   coordinates can still be plotted when their location exactly
+   matches a berth name/code returned by GET /berths.
    ========================================================= */
 
-const normalizeMapIncident = (incident) => {
-  if (!incident) {
+const normalizeLocationKey = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+
+const resolveIncidentPosition = (incident, berthRecords = []) => {
+  const latitude = toNumber(incident.latitude ?? incident.lat);
+  const longitude = toNumber(incident.longitude ?? incident.lng);
+
+  if (isValidLatitude(latitude) && isValidLongitude(longitude)) {
+    return [latitude, longitude];
+  }
+
+  const incidentLocation = normalizeLocationKey(incident.location);
+
+  if (!incidentLocation) {
     return null;
   }
 
-  const latitude = toNumber(incident.latitude);
-  const longitude = toNumber(incident.longitude);
+  const matchingBerth = berthRecords.find((berth) => {
+    if (!berth) return false;
 
-  if (!isValidLatitude(latitude) || !isValidLongitude(longitude)) {
+    const candidates = [berth.berth_code, berth.berth_name, berth.name]
+      .map(normalizeLocationKey)
+      .filter(Boolean);
+
+    return candidates.includes(incidentLocation);
+  });
+
+  if (!matchingBerth) return null;
+
+  const berthLatitude = toNumber(matchingBerth.latitude);
+  const berthLongitude = toNumber(matchingBerth.longitude);
+
+  return isValidLatitude(berthLatitude) && isValidLongitude(berthLongitude)
+    ? [berthLatitude, berthLongitude]
+    : null;
+};
+
+const normalizeMapIncident = (incident, berthRecords = []) => {
+  if (!incident || incident.id === undefined || incident.id === null) {
     return null;
   }
 
-  const status = incident.status || "Reported";
+  const position = resolveIncidentPosition(incident, berthRecords);
 
-  if (FINISHED_INCIDENT_STATUSES.includes(status)) {
+  if (!position) {
     return null;
   }
 
   return {
     id: incident.id,
     number: incident.number || `INC-${incident.id}`,
-    type: incident.type || "Incident",
+    type: INCIDENT_MARKER_CONFIG[incident.type] ? incident.type : "Other",
     severity: incident.severity || "Medium",
-    status,
+    status: incident.status || "Reported",
     location: incident.location || "",
     vessel: incident.vessel || "",
     description: incident.description || "",
     reportedBy: incident.reported_by ? incident.reported_by.name : "",
     occurredAt: incident.occurred_at || incident.created_at || null,
-    position: [latitude, longitude],
+    position,
   };
 };
 
@@ -1396,6 +1453,7 @@ const PortMap = () => {
      ======================================================= */
 
   const [mapIncidents, setMapIncidents] = React.useState([]);
+  const [unmappedIncidents, setUnmappedIncidents] = React.useState([]);
 
   /* Where the person right-clicked (null = report window closed). */
   const [reportSpot, setReportSpot] = React.useState(null);
@@ -1603,7 +1661,27 @@ const PortMap = () => {
         : null;
 
       if (records) {
-        setMapIncidents(records.map(normalizeMapIncident).filter(Boolean));
+        const berthRecords = berthResult.ok
+          ? toRecordList(berthResult.value) || []
+          : [];
+
+        const mapped = records
+          .map((incident) => normalizeMapIncident(incident, berthRecords))
+          .filter(Boolean);
+        const mappedIds = new Set(mapped.map((incident) => String(incident.id)));
+
+        setMapIncidents(mapped);
+        setUnmappedIncidents(
+          records
+            .filter((incident) => !mappedIds.has(String(incident.id)))
+            .map((incident) => ({
+              id: incident.id,
+              number: incident.number || `INC-${incident.id}`,
+              type: incident.type || "Other",
+              location: incident.location || "Location not specified",
+              status: incident.status || "Reported",
+            }))
+        );
       }
     }
 
@@ -1966,6 +2044,7 @@ const PortMap = () => {
 
       setShowIncidents(true);
       setReportSpot(null);
+      window.dispatchEvent(new Event("singapore-incidents-changed"));
 
       showMapMessage(
         `${saved ? saved.number : "The incident"} is saved and shown on the map. The people who must know have been notified.`
@@ -2039,7 +2118,7 @@ const PortMap = () => {
     {
       key: "incidents",
       swatch: "rounded-full bg-red-600",
-      label: `Incidents (${mapIncidents.length})`,
+      label: `Incidents (${mapIncidents.length + unmappedIncidents.length})`,
       checked: showIncidents,
       onChange: setShowIncidents,
     },
@@ -2496,6 +2575,12 @@ const PortMap = () => {
               swatch="rounded-full border border-gray-400 bg-gray-400/30"
               label="Faded: older position"
             />
+            {Object.entries(INCIDENT_MARKER_CONFIG).map(([type, config]) => (
+              <span key={`incident-legend-${type}`} className="flex items-center gap-1.5">
+                <span aria-hidden="true">{config.symbol}</span>
+                {type}
+              </span>
+            ))}
           </div>
 
           {/* ===================================================
@@ -2768,7 +2853,7 @@ const PortMap = () => {
                 <Marker
                   key={`incident-${incident.id}`}
                   position={incident.position}
-                  icon={alertIcon}
+                  icon={getIncidentIcon(incident.type)}
                   zIndexOffset={1800}
                 >
                   <Tooltip direction="top" offset={[0, -18]}>
@@ -2776,7 +2861,9 @@ const PortMap = () => {
                       <div className="font-bold">
                         {incident.number} · {incident.severity}
                       </div>
-                      <div>{incident.type}</div>
+                      <div>
+                        {INCIDENT_MARKER_CONFIG[incident.type]?.symbol || "ℹ️"} {incident.type}
+                      </div>
                       <div>At: {incident.location}</div>
                       {incident.vessel && <div>Vessel: {incident.vessel}</div>}
                       <div>Status: {incident.status}</div>
@@ -2871,6 +2958,25 @@ const PortMap = () => {
             placeholder="Search name, MMSI or berth"
             className="mt-3 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-navy-700 outline-none placeholder:text-gray-400 focus:border-brand-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
           />
+
+          {unmappedIncidents.length > 0 && (
+            <div className="mt-3 rounded-xl border border-amber-300/60 bg-amber-50 p-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+              <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                {unmappedIncidents.length} incident{unmappedIncidents.length === 1 ? "" : "s"} need map coordinates
+              </p>
+              <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-200">
+                These records remain in Incident Management but cannot be pinned accurately. Add latitude and longitude when reporting; older records may match a berth name/code automatically.
+              </p>
+              <div className="mt-2 max-h-32 space-y-2 overflow-y-auto">
+                {unmappedIncidents.slice(0, 20).map((incident) => (
+                  <div key={`unmapped-${incident.id}`} className="text-[11px] text-amber-900 dark:text-amber-100">
+                    <span className="font-semibold">{incident.number}</span> · {incident.type}
+                    <div className="text-amber-700 dark:text-amber-200">{incident.location} · {incident.status}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
             {aisLoading && (

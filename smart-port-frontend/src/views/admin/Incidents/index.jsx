@@ -235,6 +235,8 @@ const toLocalInput = (date) =>
 const createEmptyForm = () => ({
   type: INCIDENT_TYPES[0],
   location: "",
+  latitude: "",
+  longitude: "",
   severity: "Medium",
   vessel: "",
   description: "",
@@ -259,6 +261,8 @@ const normalizeIncident = (raw) => ({
   number: raw.number || `INC-${raw.id}`,
   type: raw.type || "",
   location: raw.location || "",
+  latitude: raw.latitude === null || raw.latitude === undefined ? null : Number(raw.latitude),
+  longitude: raw.longitude === null || raw.longitude === undefined ? null : Number(raw.longitude),
   severity: raw.severity || "Medium",
   status: raw.status || "Reported",
   vessel: raw.vessel || "",
@@ -798,6 +802,8 @@ const IncidentManagement = () => {
 
     const location = form.location.trim();
     const description = form.description.trim();
+    const latitude = form.latitude === "" ? NaN : Number(form.latitude);
+    const longitude = form.longitude === "" ? NaN : Number(form.longitude);
 
     if (!location) {
       setFormError("Enter where it happened (for example Berth 2).");
@@ -808,6 +814,16 @@ const IncidentManagement = () => {
     if (!description) {
       setFormError("Describe what happened.");
 
+      return;
+    }
+
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+      setFormError("Enter a valid latitude between -90 and 90.");
+      return;
+    }
+
+    if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+      setFormError("Enter a valid longitude between -180 and 180.");
       return;
     }
 
@@ -840,6 +856,8 @@ const IncidentManagement = () => {
       const data = await apiPost("/incidents", {
         type: form.type,
         location,
+        latitude,
+        longitude,
         severity: form.severity,
         vessel: form.vessel.trim() || null,
         description,
@@ -861,6 +879,7 @@ const IncidentManagement = () => {
 
       setLoadState("ready");
       loadedRef.current = true;
+      window.dispatchEvent(new Event("singapore-incidents-changed"));
 
       setShowForm(false);
       setForm(createEmptyForm());
@@ -904,6 +923,7 @@ const IncidentManagement = () => {
       detailVersionRef.current += 1;
 
       applyDetail(data);
+      window.dispatchEvent(new Event("singapore-incidents-changed"));
 
       if (successText) {
         showToast(successText);
@@ -1030,6 +1050,7 @@ const IncidentManagement = () => {
       setIncidents((previous) =>
         previous.filter((item) => item.id !== target.id)
       );
+      window.dispatchEvent(new Event("singapore-incidents-changed"));
 
       if (detailIdRef.current === target.id) {
         closeDetail();
@@ -1689,6 +1710,53 @@ const IncidentManagement = () => {
                     placeholder="e.g. Berth 2"
                     className={inputClasses}
                   />
+                </div>
+
+                <div>
+                  <p className={labelClasses}>Map coordinates (required)</p>
+                  <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+                    Enter the incident's actual latitude and longitude. These coordinates place this same incident on Live Port Map.
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label htmlFor="incident-latitude" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                        Latitude
+                      </label>
+                      <input
+                        id="incident-latitude"
+                        type="number"
+                        inputMode="decimal"
+                        step="any"
+                        min="-90"
+                        max="90"
+                        required
+                        value={form.latitude}
+                        disabled={submitting}
+                        onChange={(e) => handleFormChange("latitude", e.target.value)}
+                        placeholder="e.g. 1.26500"
+                        className={inputClasses}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="incident-longitude" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                        Longitude
+                      </label>
+                      <input
+                        id="incident-longitude"
+                        type="number"
+                        inputMode="decimal"
+                        step="any"
+                        min="-180"
+                        max="180"
+                        required
+                        value={form.longitude}
+                        disabled={submitting}
+                        onChange={(e) => handleFormChange("longitude", e.target.value)}
+                        placeholder="e.g. 103.80000"
+                        className={inputClasses}
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
