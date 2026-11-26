@@ -415,7 +415,6 @@ const getShipIcon = (portState, size, selected) => {
   return shipIconCache[key];
 };
 
-const gateIcon = createIcon("#7c3aed", "🚚", "emoji", 42);
 
 /* Each incident category has its own marker. Keep the values aligned
    with INCIDENT_TYPES and the backend incident_service.py list. */
@@ -441,23 +440,6 @@ const getIncidentIcon = (type) => {
 
   return incidentIconCache[type];
 };
-
-/* =========================================================
-   GATE / TRUCK MARKERS (starting positions, not survey data)
-   ========================================================= */
-
-const gates = [
-  {
-    id: "G01",
-    name: "Main Port Gate",
-    position: [1.2681, 103.7988],
-  },
-  {
-    id: "G02",
-    name: "Cargo Gate",
-    position: [1.2672, 103.8012],
-  },
-];
 
 /* =========================================================
    INCIDENTS ON THE MAP
@@ -563,59 +545,6 @@ const updateStoredLayout = (partial) => {
     console.warn("Unable to save map layout:", error);
   }
 };
-
-const cloneItems = (items) =>
-  items.map((item) => ({ ...item, position: [...item.position] }));
-
-/*
- * Apply saved positions (an {id: [lat, lng]} map) on top of the
- * default items. Missing or invalid entries use the default.
- */
-const applySavedPositions = (defaults, savedById) =>
-  defaults.map((item) => {
-    const savedPoint = savedById ? savedById[item.id] : null;
-
-    return {
-      ...item,
-      position: isPoint(savedPoint)
-        ? [Number(savedPoint[0]), Number(savedPoint[1])]
-        : [...item.position],
-    };
-  });
-
-/* Default items with their saved positions, plus the extra items the
-   user added by double-click (saved separately). */
-const buildItems = (defaults, savedById, savedExtras, nameKey) => {
-  const extras = Array.isArray(savedExtras)
-    ? savedExtras
-        .filter(
-          (item) =>
-            item &&
-            typeof item.id === "string" &&
-            typeof item[nameKey] === "string" &&
-            isPoint(item.position)
-        )
-        .map((item) => ({
-          id: item.id,
-          [nameKey]: item[nameKey],
-          extra: true,
-          position: [Number(item.position[0]), Number(item.position[1])],
-        }))
-    : [];
-
-  return [...applySavedPositions(defaults, savedById), ...extras];
-};
-
-/* A new item a little way from the one that was double-clicked. */
-const nearbyPosition = (point) => [point.lat + 0.0006, point.lng + 0.0006];
-
-const newItemId = () => `x-${Date.now().toString(36)}`;
-
-const positionsToMap = (items) =>
-  items.reduce((accumulator, item) => {
-    accumulator[item.id] = item.position;
-    return accumulator;
-  }, {});
 
 const booleanOr = (value, fallback) =>
   typeof value === "boolean" ? value : fallback;
@@ -1118,7 +1047,7 @@ const getBerthIcon = (status, zoom) =>
 
    An anchor badge (orange) for ships at anchor, a ship badge
    (green) for ships at a berth. Kept in a memoised component so
-   dragging a gate marker does not redraw every ship.
+   keeping vessel markers isolated does not redraw every ship.
    ========================================================= */
 
 const ShipMarkersBase = ({
@@ -1307,7 +1236,7 @@ const PortMap = () => {
      MAP LAYERS
 
      Ships, berths, incidents and the operational circle are on by
-     default. The gate markers are off.
+     default.
      ======================================================= */
 
   const [showBerthShips, setShowBerthShips] = React.useState(
@@ -1326,10 +1255,6 @@ const PortMap = () => {
     booleanOr(saved.layers?.berths, true)
   );
 
-  const [showGates, setShowGates] = React.useState(
-    booleanOr(saved.layers?.gates, false)
-  );
-
   /* Real incidents with a map spot: on by default. */
   const [showIncidents, setShowIncidents] = React.useState(
     booleanOr(saved.layers?.incidents, true)
@@ -1340,16 +1265,7 @@ const PortMap = () => {
     booleanOr(saved.layers?.zone, true)
   );
 
-  /* =======================================================
-     DRAGGABLE GATE MARKERS, RESIZABLE CIRCLE
-
-     Gate markers and the circle size are kept in this browser only
-     (localStorage).
-     ======================================================= */
-
-  const [gatePositions, setGatePositions] = React.useState(() =>
-    buildItems(gates, saved.gates, saved.gatesExtra, "name")
-  );
+  /* The operational circle size is kept in this browser only. */
 
   const [operationalRadius, setOperationalRadius] = React.useState(() => {
     const savedRadius = toNumber(saved.radius);
@@ -1516,28 +1432,23 @@ const PortMap = () => {
 
   React.useEffect(() => {
     updateStoredLayout({
-      gates: positionsToMap(gatePositions.filter((item) => !item.extra)),
-      gatesExtra: gatePositions.filter((item) => item.extra),
       radius: operationalRadius,
       layers: {
         berthShips: showBerthShips,
         anchorShips: showAnchorShips,
         oldShips: showOldShips,
         berths: showBerths,
-        gates: showGates,
         incidents: showIncidents,
         zone: showArea,
       },
       mapType,
     });
   }, [
-    gatePositions,
     operationalRadius,
     showBerthShips,
     showAnchorShips,
     showOldShips,
     showBerths,
-    showGates,
     showIncidents,
     showArea,
     mapType,
@@ -1936,15 +1847,6 @@ const PortMap = () => {
     setFlyTarget({ coordinates: SINGAPORE_PORT, zoom: DEFAULT_ZOOM });
   };
 
-  /* =======================================================
-     RESET ICONS (gate markers back to their defaults, added ones
-     removed)
-     ======================================================= */
-
-  const handleResetIcons = () => {
-    setGatePositions(cloneItems(gates));
-  };
-
   const handleResetCircle = () => {
     setOperationalRadius(DEFAULT_RADIUS);
     setHandleAngle(0);
@@ -2107,22 +2009,13 @@ const PortMap = () => {
     },
   ];
 
-  const operationLayers = [
-    {
-      key: "gates",
-      swatch: "rounded-full bg-purple-500",
-      label: "Gates / Trucks",
-      checked: showGates,
-      onChange: setShowGates,
-    },
-    {
-      key: "incidents",
-      swatch: "rounded-full bg-red-600",
-      label: `Incidents (${mapIncidents.length + unmappedIncidents.length})`,
-      checked: showIncidents,
-      onChange: setShowIncidents,
-    },
-  ];
+  const incidentLayer = {
+    key: "incidents",
+    swatch: "rounded-full bg-red-600",
+    label: `Incidents (${mapIncidents.length + unmappedIncidents.length})`,
+    checked: showIncidents,
+    onChange: setShowIncidents,
+  };
 
   /* =======================================================
      NOTICES (shown above the map, never on top of it)
@@ -2405,19 +2298,15 @@ const PortMap = () => {
               </div>
             )}
 
-            <p className="mb-1 mt-3 text-[10px] font-bold uppercase tracking-wide text-gray-400">
-              Operations
-            </p>
-
-            {operationLayers.map((layer) => (
+            <div className="mt-3">
               <LayerRow
-                key={layer.key}
-                swatch={layer.swatch}
-                label={layer.label}
-                checked={layer.checked}
-                onChange={layer.onChange}
+                key={incidentLayer.key}
+                swatch={incidentLayer.swatch}
+                label={incidentLayer.label}
+                checked={incidentLayer.checked}
+                onChange={incidentLayer.onChange}
               />
-            ))}
+            </div>
 
             <p
               className="mt-1 text-[10px] leading-4 text-gray-500 dark:text-gray-400"
@@ -2531,17 +2420,6 @@ const PortMap = () => {
               =================================================== */}
 
           <div className="absolute bottom-5 right-[56px] z-[1000] flex gap-2">
-            {showGates && (
-              <button
-                type="button"
-                onClick={handleResetIcons}
-                title="Restore the default gate markers"
-                className="rounded-xl bg-white/95 px-3 py-2 text-xs font-bold text-navy-700 shadow-xl backdrop-blur transition hover:bg-white dark:bg-navy-800/95 dark:text-white"
-              >
-                Reset Icons
-              </button>
-            )}
-
             <button
               type="button"
               onClick={handleReset}
@@ -2791,60 +2669,6 @@ const PortMap = () => {
               ))}
 
             {/* =================================================
-                GATES / TRUCKS (draggable, saved; double-click adds one)
-                ================================================= */}
-
-            {showGates &&
-              gatePositions.map((gate) => (
-                <Marker
-                  key={gate.id}
-                  position={gate.position}
-                  icon={gateIcon}
-                  draggable={true}
-                  eventHandlers={{
-                    ...(gate.extra
-                      ? {
-                          contextmenu: () =>
-                            setGatePositions((current) =>
-                              current.filter((item) => item.id !== gate.id)
-                            ),
-                        }
-                      : {}),
-                    dblclick: (event) => {
-                      const point = event.target.getLatLng();
-
-                      setGatePositions((current) => [
-                        ...current,
-                        {
-                          id: newItemId(),
-                          name: `Gate ${current.length + 1}`,
-                          extra: true,
-                          position: nearbyPosition(point),
-                        },
-                      ]);
-                    },
-                    dragend: (event) => {
-                      const point = event.target.getLatLng();
-
-                      setGatePositions((current) =>
-                        current.map((item) =>
-                          item.id === gate.id
-                            ? { ...item, position: [point.lat, point.lng] }
-                            : item
-                        )
-                      );
-                    },
-                  }}
-                >
-                  <Tooltip direction="top" offset={[0, -18]}>
-                    <div className="font-bold">{gate.name}</div>
-                    <div>Drag to move · double-click to add another</div>
-                    {gate.extra && <div>Right-click to remove</div>}
-                  </Tooltip>
-                </Marker>
-              ))}
-
-            {/* =================================================
                 INCIDENTS (from the database, not draggable)
                 ================================================= */}
 
@@ -3062,8 +2886,8 @@ const PortMap = () => {
       <p className="mt-3 text-[11px] leading-4 text-gray-500 dark:text-gray-400">
         Ship positions are the last AIS positions saved in the database, not a
         live feed. Berths come from Berth Management. Incidents come from
-        the incident register (only open ones with a map spot). Gate markers
-        are placed by hand and saved in this browser.
+        the incident register. Incidents with known map coordinates are pinned;
+        incidents without coordinates remain listed for location assignment.
       </p>
 
       {/* ===================================================
